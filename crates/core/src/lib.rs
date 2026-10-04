@@ -3,6 +3,8 @@
 //! the privileged helper drives these pipelines against a raw device.
 
 pub mod blockio;
+pub mod checksum;
+pub mod image;
 pub mod ipc;
 pub mod progress;
 pub mod write_raw;
