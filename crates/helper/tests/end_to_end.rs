@@ -1,0 +1,145 @@
+//! Runs the real helper binary over a real local socket, with a plain file
+//! standing in for the drive.
+
+use std::io::{BufReader, Write};
+use std::path::Path;
+use std::process::{Child, Command};
+
+use inphiso_core::ipc::{recv, send, AppMsg, HelperMsg, Job, Mode};
+use inphiso_platform::channel::{listen, random_hex};
+use interprocess::local_socket::traits::{ListenerExt as _, Stream as _};
+
+fn spawn_helper(socket: &str, token: &str) -> Child {
+    Command::new(env!("CARGO_BIN_EXE_inphiso-helper"))
+        .args(["--socket", socket, "--token", token])
+        .env(inphiso_platform::device::ALLOW_FILE_ENV, "1")
+        .spawn()
+        .expect("spawn helper")
+}
+
+fn write_file(path: &Path, len: usize) -> Vec<u8> {
+    let data: Vec<u8> = (0..len).map(|i| (i * 7 % 253) as u8).collect();
+    std::fs::File::create(path)
+        .unwrap()
+        .write_all(&data)
+        .unwrap();
+    data
+}
+
+/// Runs one job and returns every message after Hello.
+fn run_job(job_for: impl FnOnce() -> Job, cancel_after_first_progress: bool) -> Vec<HelperMsg> {
+    let server = listen().unwrap();
+    let token = random_hex(16);
+    let mut child = spawn_helper(&server.name, &token);
+
+    let conn = server.listener.incoming().next().unwrap().unwrap();
+    let (rx, mut tx) = conn.split();
+    let mut rx = BufReader::new(rx);
+
+    match recv::<HelperMsg>(&mut rx).unwrap() {
+        Some(HelperMsg::Hello { token: t, .. }) => assert_eq!(t, token),
+        other => panic!("expected hello, got {other:?}"),
+    }
+    send(&mut tx, &AppMsg::Start { job: job_for() }).unwrap();
+
+    let mut msgs = Vec::new();
+    while let Some(msg) = recv::<HelperMsg>(&mut rx).unwrap() {
+        let first_progress = matches!(msg, HelperMsg::Progress { .. }) && msgs.is_empty();
+        let end = matches!(
+            msg,
+            HelperMsg::Done { .. } | HelperMsg::Error { .. } | HelperMsg::Cancelled
+        );
+        msgs.push(msg);
+        if first_progress && cancel_after_first_progress {
+            send(&mut tx, &AppMsg::Cancel).unwrap();
+        }
+        if end {
+            break;
+        }
+    }
+    assert!(child.wait().unwrap().success());
+    msgs
+}
+
+#[test]
+fn flashes_and_verifies_a_file_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let image = dir.path().join("image.img");
+    let target = dir.path().join("drive.bin");
+    let data = write_file(&image, 9 * 1024 * 1024 + 4096);
+    std::fs::File::create(&target)
+        .unwrap()
+        .set_len(16 * 1024 * 1024)
+        .unwrap();
+
+    let msgs = run_job(
+        || Job {
+            image: image.clone(),
+            device: target.to_string_lossy().into(),
+            device_size: 16 * 1024 * 1024,
+            mode: Mode::Raw,
+            verify: true,
+        },
+        false,
+    );
+
+    match msgs.last().unwrap() {
+        HelperMsg::Done { verified, .. } => assert!(verified),
+        other => panic!("expected done, got {other:?}"),
+    }
+    let phases: Vec<_> = msgs
+        .iter()
+        .filter_map(|m| match m {
+            HelperMsg::Progress { progress } => Some(progress.phase),
+            _ => None,
+        })
+        .collect();
+    assert!(phases.contains(&inphiso_core::progress::Phase::Write));
+    assert!(phases.contains(&inphiso_core::progress::Phase::Verify));
+
+    let written = std::fs::read(&target).unwrap();
+    assert_eq!(&written[..data.len()], &data[..]);
+}
+
+#[test]
+fn reports_errors_instead_of_crashing() {
+    let dir = tempfile::tempdir().unwrap();
+    let msgs = run_job(
+        || Job {
+            image: dir.path().join("missing.iso"),
+            device: dir.path().join("nope").to_string_lossy().into(),
+            device_size: 1,
+            mode: Mode::Raw,
+            verify: false,
+        },
+        false,
+    );
+    match msgs.last().unwrap() {
+        HelperMsg::Error { message } => assert!(message.contains("missing.iso"), "{message}"),
+        other => panic!("expected error, got {other:?}"),
+    }
+}
+
+#[test]
+fn cancels_mid_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let image = dir.path().join("big.img");
+    let target = dir.path().join("drive.bin");
+    write_file(&image, 256 * 1024 * 1024);
+    std::fs::File::create(&target)
+        .unwrap()
+        .set_len(300 * 1024 * 1024)
+        .unwrap();
+
+    let msgs = run_job(
+        || Job {
+            image: image.clone(),
+            device: target.to_string_lossy().into(),
+            device_size: 300 * 1024 * 1024,
+            mode: Mode::Raw,
+            verify: true,
+        },
+        true,
+    );
+    assert_eq!(msgs.last().unwrap(), &HelperMsg::Cancelled);
+}
