@@ -240,7 +240,7 @@ export default function App() {
             }
           />
           <main className="body">
-            <Writing progress={state.progress} speeds={state.speeds} verify={settings.verify} />
+            <Writing progress={state.progress} speeds={state.speeds} verify={settings.verify} mode={state.mode} />
           </main>
           <footer className="footer">
             <div className="footer-note mono">{pickedDrive?.id}</div>

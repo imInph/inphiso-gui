@@ -1,16 +1,17 @@
 import { formatBytes, formatBytesOf, formatEta, formatSpeed } from "../format";
-import type { Progress } from "../types";
+import type { FlashMode, Progress } from "../types";
 
 interface Props {
   progress: Progress | null;
   speeds: Array<[number, number]>;
   verify: boolean;
+  mode: FlashMode | null;
 }
 
 // The write segment takes 3/4 of the bar when verification follows, as in the mockup.
 const WRITE_SHARE = 0.75;
 
-export function Writing({ progress, speeds, verify }: Props) {
+export function Writing({ progress, speeds, verify, mode }: Props) {
   const phase = progress?.phase ?? "write";
   const frac = progress?.total ? Math.min(progress.bytes / progress.total, 1) : 0;
   const writeFrac = phase === "write" ? frac : 1;
@@ -23,7 +24,9 @@ export function Writing({ progress, speeds, verify }: Props) {
     <div className="writing-card">
       <div className="writing-head">
         <div className="writing-titles">
-          <div className="writing-title">{phase === "verify" ? "Verifying" : "Writing image"}</div>
+          <div className="writing-title">
+            {phase === "verify" ? "Verifying" : mode === "windows" ? "Creating installer drive" : "Writing image"}
+          </div>
           <div className="writing-sub">
             {phase === "verify"
               ? "Reading the drive back to check every byte."
