@@ -1475,6 +1475,7 @@ dependencies = [
 name = "inphiso-app"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "inphiso-core",
  "inphiso-platform",
  "serde",
@@ -1498,7 +1499,10 @@ dependencies = [
 name = "inphiso-core"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "serde",
+ "serde_json",
+ "sha2",
  "thiserror 2.0.21",
 ]
 
