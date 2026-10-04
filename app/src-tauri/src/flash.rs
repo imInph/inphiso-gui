@@ -6,13 +6,12 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, TryRecvError};
 use std::sync::Mutex;
-use std::time::Duration;
 
 use inphiso_core::ipc::{recv, send, AppMsg, HelperMsg, Job, Mode, PartitionScheme};
 use inphiso_platform::channel::{listen, random_hex};
 use inphiso_platform::elevate::run_elevated;
-use interprocess::local_socket::traits::{Listener as _, Stream as _};
-use interprocess::local_socket::{ListenerNonblockingMode, SendHalf};
+use interprocess::local_socket::traits::Stream as _;
+use interprocess::local_socket::SendHalf;
 use serde::Deserialize;
 use tauri::ipc::Channel;
 
@@ -64,6 +63,20 @@ impl FlashState {
         if let Some(tx) = self.tx.lock().unwrap().as_mut() {
             let _ = send(tx, &AppMsg::Cancel);
         }
+    }
+}
+
+/// Appends the end of the helper's log to an error, so failures explain themselves.
+fn with_log(message: &str, log: &std::path::Path) -> String {
+    let Ok(text) = std::fs::read_to_string(log) else {
+        return message.to_string();
+    };
+    let lines: Vec<&str> = text.lines().collect();
+    let tail = lines[lines.len().saturating_sub(8)..].join("\n");
+    if tail.trim().is_empty() {
+        message.to_string()
+    } else {
+        format!("{message}\n\n{tail}")
     }
 }
 
@@ -131,6 +144,8 @@ fn drive(state: &FlashState, job: FlashJob, events: &Channel<HelperMsg>) -> Opti
             server.name.clone(),
             "--token".to_string(),
             token.clone(),
+            "--log".to_string(),
+            server.log_path.to_string_lossy().into_owned(),
         ];
         std::thread::spawn(move || {
             let _ = done_tx.send(run_elevated(&helper, &args));
@@ -138,30 +153,29 @@ fn drive(state: &FlashState, job: FlashJob, events: &Channel<HelperMsg>) -> Opti
     }
 
     // Wait for the helper to connect, while the user deals with the password prompt.
-    if let Err(e) = server
-        .listener
-        .set_nonblocking(ListenerNonblockingMode::Accept)
-    {
-        return fail(e.to_string());
-    }
-    let conn = loop {
-        match server.listener.accept() {
-            Ok(c) => break c,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-            Err(e) => return fail(format!("the writer couldn't connect: {e}")),
-        }
+    let waited = server.accept_polling(|| {
         match done_rx.try_recv() {
             Ok(Err(inphiso_platform::Error::AuthCancelled)) => return Some(HelperMsg::Cancelled),
-            Ok(Err(e)) => return fail(format!("{e}")),
-            Ok(Ok(())) => return fail("the writer exited before it connected".into()),
+            Ok(Err(e)) => return fail(with_log(&e.to_string(), &server.log_path)),
+            Ok(Ok(())) => {
+                return fail(with_log(
+                    "the writer exited before it connected",
+                    &server.log_path,
+                ))
+            }
             Err(TryRecvError::Disconnected) => return fail("the writer didn't start".into()),
             Err(TryRecvError::Empty) => {}
         }
         // Can't stop the password prompt once it's up, but nothing gets written.
-        if state.cancel.load(Ordering::SeqCst) {
-            return Some(HelperMsg::Cancelled);
-        }
-        std::thread::sleep(Duration::from_millis(50));
+        state
+            .cancel
+            .load(Ordering::SeqCst)
+            .then_some(HelperMsg::Cancelled)
+    });
+    let conn = match waited {
+        Ok(Ok(conn)) => conn,
+        Ok(Err(msg)) => return Some(msg),
+        Err(e) => return fail(format!("the writer couldn't connect: {e}")),
     };
 
     let (rx, mut tx) = conn.split();
@@ -197,7 +211,12 @@ fn drive(state: &FlashState, job: FlashJob, events: &Channel<HelperMsg>) -> Opti
                     return None;
                 }
             }
-            Ok(None) | Err(_) => return fail("the writer stopped unexpectedly".into()),
+            Ok(None) | Err(_) => {
+                return fail(with_log(
+                    "the writer stopped unexpectedly",
+                    &server.log_path,
+                ))
+            }
         }
     }
 }

@@ -20,14 +20,48 @@ pub struct Server {
     pub listener: Listener,
     /// What the helper passes to [`connect`].
     pub name: String,
+    /// Where the helper writes its log, readable by the app afterwards.
+    pub log_path: std::path::PathBuf,
     #[cfg(unix)]
     dir: PathBuf,
+}
+
+impl Server {
+    /// Waits for the helper to connect, polling `give_up` every 50 ms so the
+    /// caller can stop waiting (say, the password prompt was cancelled).
+    /// Returns `Ok(Err(reason))` if `give_up` did.
+    pub fn accept_polling<T>(
+        &self,
+        mut give_up: impl FnMut() -> Option<T>,
+    ) -> io::Result<Result<Stream, T>> {
+        use interprocess::local_socket::ListenerNonblockingMode;
+        self.listener
+            .set_nonblocking(ListenerNonblockingMode::Accept)?;
+        loop {
+            match self.listener.accept() {
+                Ok(stream) => {
+                    // On macOS (BSD) an accepted socket inherits O_NONBLOCK from the
+                    // listener; reads would then fail with WouldBlock instead of waiting.
+                    stream.set_nonblocking(false)?;
+                    return Ok(Ok(stream));
+                }
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+                Err(e) => return Err(e),
+            }
+            if let Some(reason) = give_up() {
+                return Ok(Err(reason));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
 }
 
 impl Drop for Server {
     fn drop(&mut self) {
         #[cfg(unix)]
         let _ = std::fs::remove_dir_all(&self.dir);
+        #[cfg(windows)]
+        let _ = std::fs::remove_file(&self.log_path);
     }
 }
 
@@ -47,6 +81,7 @@ pub fn listen() -> io::Result<Server> {
     Ok(Server {
         listener,
         name,
+        log_path: dir.join("helper.log"),
         dir,
     })
 }
@@ -59,7 +94,12 @@ pub fn listen() -> io::Result<Server> {
     let listener = ListenerOptions::new()
         .name(name.as_str().to_ns_name::<GenericNamespaced>()?)
         .create_sync()?;
-    Ok(Server { listener, name })
+    let log_path = std::env::temp_dir().join(format!("{name}.log"));
+    Ok(Server {
+        listener,
+        name,
+        log_path,
+    })
 }
 
 /// Client side, used by the helper.
@@ -93,6 +133,24 @@ mod tests {
         let mut line = String::new();
         BufReader::new(conn).read_line(&mut line).unwrap();
         assert_eq!(line, "hello\n");
+        client.join().unwrap();
+    }
+
+    /// The accepted stream must block on reads even though the listener polls.
+    #[test]
+    fn polled_accept_gives_a_blocking_stream() {
+        let server = listen().unwrap();
+        let name = server.name.clone();
+        let client = std::thread::spawn(move || {
+            let mut s = connect(&name).unwrap();
+            // Connect first, write later: a non-blocking stream would see WouldBlock.
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            s.write_all(b"late\n").unwrap();
+        });
+        let conn = server.accept_polling(|| None::<()>).unwrap().unwrap();
+        let mut line = String::new();
+        BufReader::new(conn).read_line(&mut line).unwrap();
+        assert_eq!(line, "late\n");
         client.join().unwrap();
     }
 

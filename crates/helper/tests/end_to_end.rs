@@ -7,7 +7,7 @@ use std::process::{Child, Command};
 
 use inphiso_core::ipc::{recv, send, AppMsg, HelperMsg, Job, Mode};
 use inphiso_platform::channel::{listen, random_hex};
-use interprocess::local_socket::traits::{ListenerExt as _, Stream as _};
+use interprocess::local_socket::traits::Stream as _;
 
 fn spawn_helper(socket: &str, token: &str) -> Child {
     Command::new(env!("CARGO_BIN_EXE_inphiso-helper"))
@@ -32,7 +32,8 @@ fn run_job(job_for: impl FnOnce() -> Job, cancel_after_first_progress: bool) -> 
     let token = random_hex(16);
     let mut child = spawn_helper(&server.name, &token);
 
-    let conn = server.listener.incoming().next().unwrap().unwrap();
+    // Same polling accept the app uses, so its quirks are covered here too.
+    let conn = server.accept_polling(|| None::<()>).unwrap().unwrap();
     let (rx, mut tx) = conn.split();
     let mut rx = BufReader::new(rx);
 
@@ -201,4 +202,34 @@ fn flashes_a_windows_iso_to_a_file_target() {
     }
     let disk = std::fs::read(&target).unwrap();
     assert_eq!(&disk[512..520], b"EFI PART");
+}
+
+/// Flashes a real image to a sparse file: `INPHISO_E2E_IMAGE=/path/to.iso cargo test
+/// -p inphiso-helper real_image -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn real_image_to_a_file_target() {
+    let Ok(image) = std::env::var("INPHISO_E2E_IMAGE") else {
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("drive.bin");
+    let size = 16_000_000_000u64;
+    std::fs::File::create(&target)
+        .unwrap()
+        .set_len(size)
+        .unwrap();
+    let msgs = run_job(
+        || Job {
+            image: image.clone().into(),
+            device: target.to_string_lossy().into(),
+            device_size: size,
+            mode: Mode::Raw,
+            verify: false,
+        },
+        false,
+    );
+    let last = msgs.last().unwrap();
+    eprintln!("{} messages, last: {last:?}", msgs.len());
+    assert!(matches!(last, HelperMsg::Done { .. }), "{last:?}");
 }
