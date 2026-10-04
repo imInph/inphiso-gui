@@ -1,0 +1,12 @@
+[package]
+name = "inphiso-platform"
+description = "Per-OS drive listing, unmounting, raw device access and elevation for inphiso"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true

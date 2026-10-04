@@ -1,0 +1,13 @@
+[package]
+name = "inphiso-helper"
+description = "Privileged writer process for inphiso"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+inphiso-core.workspace = true
+inphiso-platform.workspace = true
+anyhow.workspace = true

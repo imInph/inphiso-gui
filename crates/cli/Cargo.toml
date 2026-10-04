@@ -1,0 +1,17 @@
+[package]
+name = "inphiso-cli"
+description = "Command-line front end for inphiso"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "inphiso"
+path = "src/main.rs"
+
+[dependencies]
+inphiso-core.workspace = true
+inphiso-platform.workspace = true
+anyhow.workspace = true
