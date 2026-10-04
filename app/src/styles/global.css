@@ -1,0 +1,31 @@
+:root {
+  --bg: #e3ebf0;
+  --ink: #0b2230;
+  --accent: #17898a;
+  --muted: #5b6b77;
+  --border: #c3ced8;
+  --card: #f5f8fa;
+  --card-alt: #edf2f5;
+  --accent-soft: #c8dfe1;
+  --dot: #9fb0bc;
+  --on-accent: #f2f7f8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Geist", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
