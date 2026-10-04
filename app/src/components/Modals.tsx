@@ -285,7 +285,7 @@ export function SettingsModal({
       </div>
       <div className="settings-footer">
         <span className="mono">inphiso {version}</span>
-        <span>MIT · bundles wimlib (LGPLv3) and Geist (OFL)</span>
+        <span>GPL-3.0-or-later · bundles wimlib (GPLv3) and Geist (OFL)</span>
       </div>
       <div className="dialog-actions">
         <button className="btn-primary lg" onClick={onClose}>

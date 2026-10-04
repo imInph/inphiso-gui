@@ -83,6 +83,13 @@ installer/        Windows installer template, DMG background, polkit policy
 
 ## License
 
-MIT, see [LICENSE](LICENSE). The macOS and Windows builds include
-[wimlib](https://wimlib.net)'s `wimlib-imagex` (GPLv3, library LGPLv3) unmodified, with its
-license texts and a link to its source.
+Copyright (C) 2026 imInph
+
+inphiso is free software: you can redistribute it and/or modify it under the terms of the
+GNU General Public License as published by the Free Software Foundation, either version 3
+of the License, or (at your option) any later version. It is distributed in the hope that it
+will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See [LICENSE](LICENSE) for the full text.
+
+The macOS and Windows builds include [wimlib](https://wimlib.net)'s `wimlib-imagex`
+(GPLv3, library LGPLv3) unmodified, with its license texts and a link to its source.

@@ -50,7 +50,7 @@
     ],
     "publisher": "imInph",
     "homepage": "https://github.com/imInph/inphiso-gui",
-    "license": "MIT",
+    "license": "GPL-3.0-or-later",
     "longDescription": "Flash Windows and Linux disk images to USB drives. Handles Windows installer ISOs (FAT32 with a split install.wim), compressed images, checksums and verification.",
     "resources": {
       "../../LICENSE": "LICENSE"
