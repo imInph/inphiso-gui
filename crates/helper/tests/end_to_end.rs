@@ -143,3 +143,62 @@ fn cancels_mid_write() {
     );
     assert_eq!(msgs.last().unwrap(), &HelperMsg::Cancelled);
 }
+
+fn make_udf(src: &Path, out: &Path) -> bool {
+    let tries: [(&str, &[&str]); 2] = [
+        (
+            "hdiutil",
+            &["makehybrid", "-udf", "-udf-version", "1.02", "-o"],
+        ),
+        ("genisoimage", &["-quiet", "-udf", "-o"]),
+    ];
+    tries.iter().any(|(tool, args)| {
+        Command::new(tool)
+            .args(*args)
+            .arg(out)
+            .arg(src)
+            .output()
+            .is_ok_and(|o| o.status.success())
+    })
+}
+
+#[test]
+fn flashes_a_windows_iso_to_a_file_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(src.join("sources")).unwrap();
+    std::fs::create_dir_all(src.join("efi/boot")).unwrap();
+    std::fs::write(src.join("bootmgr"), b"boot").unwrap();
+    std::fs::write(src.join("efi/boot/bootx64.efi"), b"efi").unwrap();
+    write_file(&src.join("sources/install.wim"), 3 * 1024 * 1024);
+    let iso = dir.path().join("win.iso");
+    if !make_udf(&src, &iso) {
+        eprintln!("skipping: no UDF image tool");
+        return;
+    }
+    let target = dir.path().join("drive.bin");
+    let size = 128 * 1024 * 1024;
+    std::fs::File::create(&target)
+        .unwrap()
+        .set_len(size)
+        .unwrap();
+
+    let msgs = run_job(
+        || Job {
+            image: iso.clone(),
+            device: target.to_string_lossy().into(),
+            device_size: size,
+            mode: Mode::Windows {
+                scheme: inphiso_core::ipc::PartitionScheme::Gpt,
+            },
+            verify: true,
+        },
+        false,
+    );
+    match msgs.last().unwrap() {
+        HelperMsg::Done { verified, .. } => assert!(verified),
+        other => panic!("expected done, got {other:?}"),
+    }
+    let disk = std::fs::read(&target).unwrap();
+    assert_eq!(&disk[512..520], b"EFI PART");
+}

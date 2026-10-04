@@ -5,15 +5,22 @@
 // No console window flashing up behind the UAC prompt on Windows.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom, Write};
-use std::process::ExitCode;
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitCode};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
+use inphiso_core::image::Compression;
 use inphiso_core::ipc::{recv, send, AppMsg, HelperMsg, Job, Mode};
 use inphiso_core::write_raw::{verify, write_image, Target};
+use inphiso_core::write_windows::{
+    verify_windows, write_windows, WimSplitter, WindowsJob, FAT32_MAX_FILE,
+};
+use inphiso_platform::fs::{big_temp_dir, find_tool, free_space};
 use inphiso_platform::Device;
 use interprocess::local_socket::traits::Stream as _;
 
@@ -132,48 +139,158 @@ impl Target for Drive {
     }
 }
 
-/// Runs the job. Returns whether the result was verified.
-fn flash(
-    job: &Job,
-    cancel: &AtomicBool,
-    on_progress: &mut dyn FnMut(inphiso_core::progress::Progress),
-) -> Result<bool> {
-    if let Mode::Windows { .. } = job.mode {
-        bail!("Writing Windows installer images isn't supported yet.");
-    }
+type OnProgress<'a> = &'a mut dyn FnMut(inphiso_core::progress::Progress);
 
+/// Runs the job. Returns whether the result was verified.
+fn flash(job: &Job, cancel: &AtomicBool, on_progress: OnProgress) -> Result<bool> {
     let meta = std::fs::metadata(&job.image)
         .with_context(|| format!("couldn't open {}", job.image.display()))?;
     if !meta.is_file() {
         bail!("{} isn't a regular file", job.image.display());
     }
     // Decompresses on the fly; the size is unknown for gzip/bzip2/zstd.
-    let (image, _, image_size) = inphiso_core::image::open(&job.image)
+    let (image, compression, image_size) = inphiso_core::image::open(&job.image)
         .with_context(|| format!("couldn't read {}", job.image.display()))?;
+    if let Mode::Windows { .. } = job.mode {
+        if compression != Compression::None {
+            bail!("Windows installers have to be a plain .iso, not a compressed file.");
+        }
+    }
 
     let device = inphiso_platform::open_for_writing(&job.device, job.device_size)?;
     let (size, sector) = (device.size(), device.sector());
     let mut drive = Drive(device);
 
-    let out = write_image(
-        image,
-        &mut drive,
-        image_size,
-        size,
-        sector,
-        cancel,
-        on_progress,
-    )?;
-    if job.verify {
-        verify(
-            &mut drive,
-            out.bytes,
-            &out.sha256,
-            sector,
-            cancel,
-            on_progress,
-        )?;
+    match job.mode {
+        Mode::Raw => {
+            let out = write_image(
+                image,
+                &mut drive,
+                image_size,
+                size,
+                sector,
+                cancel,
+                on_progress,
+            )?;
+            if job.verify {
+                verify(
+                    &mut drive,
+                    out.bytes,
+                    &out.sha256,
+                    sector,
+                    cancel,
+                    on_progress,
+                )?;
+            }
+        }
+        Mode::Windows { scheme } => {
+            drop(image);
+            let iso = BufReader::with_capacity(1 << 20, File::open(&job.image)?);
+            let temp_dir = big_temp_dir();
+            let splitter = Wimlib(find_tool("wimlib-imagex"));
+            let wjob = WindowsJob {
+                scheme,
+                temp_free: free_space(&temp_dir).ok(),
+                temp_dir: &temp_dir,
+                splitter: &splitter,
+                split_above: FAT32_MAX_FILE,
+            };
+            let out = write_windows(iso, &mut drive, size, sector, &wjob, cancel, on_progress)?;
+            if job.verify {
+                verify_windows(&mut drive, sector, &out, cancel, on_progress)?;
+            }
+        }
     }
     drive.0.finish().context("finishing the write")?;
     Ok(job.verify)
+}
+
+/// Splits install.wim with wimlib's command-line tool, shipped next to the helper.
+struct Wimlib(Option<PathBuf>);
+
+impl WimSplitter for Wimlib {
+    fn split(&self, wim: &Path, dest: &Path, part_mib: u32) -> std::io::Result<Vec<PathBuf>> {
+        let tool = self.0.as_ref().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "wimlib-imagex is missing, so install.wim can't be split. Reinstall inphiso.",
+            )
+        })?;
+        let out = Command::new(tool)
+            .arg("split")
+            .arg(wim)
+            .arg(dest.join("install.swm"))
+            .arg(part_mib.to_string())
+            .output()?;
+        if !out.status.success() {
+            return Err(std::io::Error::other(
+                String::from_utf8_lossy(&out.stderr).trim().to_string(),
+            ));
+        }
+        // install.swm, install2.swm, install3.swm, ... in order.
+        let mut parts: Vec<(u32, PathBuf)> = std::fs::read_dir(dest)?
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                let name = e.file_name().to_string_lossy().to_lowercase();
+                let n = name.strip_prefix("install")?.strip_suffix(".swm")?;
+                let index = if n.is_empty() { 1 } else { n.parse().ok()? };
+                Some((index, e.path()))
+            })
+            .collect();
+        parts.sort();
+        Ok(parts.into_iter().map(|(_, p)| p).collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Uses the real wimlib when it's installed (CI installs it on Linux).
+    #[test]
+    fn splits_a_real_wim_in_order() {
+        let Some(tool) = find_tool("wimlib-imagex") else {
+            eprintln!("skipping: wimlib-imagex not installed");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        // Incompressible data so the WIM really needs several 1 MiB parts.
+        let mut seed = 1u64;
+        let data: Vec<u8> = (0..5_000_000)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                seed as u8
+            })
+            .collect();
+        std::fs::write(src.join("payload.bin"), &data).unwrap();
+        let wim = dir.path().join("install.wim");
+        let ok = Command::new(&tool)
+            .args(["capture"])
+            .arg(&src)
+            .arg(&wim)
+            .args(["--compress=none"])
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "wimlib capture failed");
+
+        let parts_dir = dir.path().join("parts");
+        std::fs::create_dir_all(&parts_dir).unwrap();
+        let parts = Wimlib(Some(tool)).split(&wim, &parts_dir, 1).unwrap();
+        assert!(parts.len() >= 4, "{parts:?}");
+        let names: Vec<String> = parts
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names[0], "install.swm");
+        assert_eq!(names[1], "install2.swm");
+        assert_eq!(
+            names[names.len() - 1],
+            format!("install{}.swm", names.len())
+        );
+    }
 }
