@@ -2,10 +2,12 @@
 //! checksums and the write pipelines. Nothing in here needs elevated rights;
 //! the privileged helper drives these pipelines against a raw device.
 
+pub mod blockcache;
 pub mod blockio;
 pub mod checksum;
 pub mod image;
 pub mod ipc;
+pub mod partition;
 pub mod progress;
 pub mod udf;
 
