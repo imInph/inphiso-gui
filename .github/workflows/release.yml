@@ -94,9 +94,28 @@ jobs:
           releaseDraft: true
           prerelease: false
 
+      # Portable .tar.gz next to the .deb, .rpm and AppImage.
+      - name: Linux tarball
+        id: tarball
+        if: runner.os == 'Linux'
+        run: echo "path=$(installer/linux/make-tarball.sh ${{ matrix.target }})" >> "$GITHUB_OUTPUT"
+
+      - name: Attach tarball to the draft release
+        if: runner.os == 'Linux' && startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          file="${{ steps.tarball.outputs.path }}"
+          gh api --method POST \
+            -H "Content-Type: application/gzip" \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/${{ steps.tauri.outputs.releaseId }}/assets?name=$(basename "$file")" \
+            --input "$file" > /dev/null
+
       - uses: actions/upload-artifact@v4
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         with:
           name: inphiso-${{ matrix.target }}
-          path: ${{ join(fromJSON(steps.tauri.outputs.artifactPaths), fromJSON('"\n"')) }}
+          path: |
+            ${{ join(fromJSON(steps.tauri.outputs.artifactPaths), fromJSON('"\n"')) }}
+            ${{ steps.tarball.outputs.path }}
           if-no-files-found: error

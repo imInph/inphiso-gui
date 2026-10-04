@@ -38,7 +38,7 @@ handles the stuff that usually breaks: Windows ISOs from macOS or Linux, oversiz
 |---|---|---|
 | Windows 10/11 | x64, arm64 | `inphiso_<version>_<arch>-setup.exe` |
 | macOS 11+ | Apple Silicon, Intel | `inphiso_<version>_<arch>.dmg` |
-| Linux | x64, arm64 | `.deb`, `.rpm`, `.AppImage` |
+| Linux | x64, arm64 | `.deb`, `.rpm`, `.AppImage`, `.tar.gz` |
 
 Builds aren't code-signed yet, so the OS will warn you the first time:
 
@@ -49,7 +49,9 @@ Builds aren't code-signed yet, so the OS will warn you the first time:
   it can't verify the developer: open *System Settings → Privacy & Security* and choose
   *Open Anyway*.
 - **Linux:** the `.deb` and `.rpm` pull in `wimtools` / `wimlib-utils` (for Windows ISOs) and
-  pkexec. With the AppImage, install `wimtools` yourself if you flash Windows ISOs.
+  pkexec. With the AppImage or the `.tar.gz`, install `wimtools` yourself if you flash Windows
+  ISOs. The `.tar.gz` runs in place (`./inphiso`) or installs to `/opt/inphiso` with
+  `sudo ./install.sh`.
 
 ## Building
 
