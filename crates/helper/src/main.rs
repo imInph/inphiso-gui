@@ -24,7 +24,19 @@ use inphiso_platform::fs::{big_temp_dir, find_tool, free_space};
 use inphiso_platform::Device;
 use interprocess::local_socket::traits::Stream as _;
 
-const USAGE: &str = "usage: inphiso-helper --socket <name> --token <token>";
+const USAGE: &str = "usage: inphiso-helper --socket <name> --token <token> [--log <file>]";
+
+/// Optional log file (`--log`), so a failure can be explained even when the
+/// helper's stdout and stderr go nowhere (as under the macOS admin prompt).
+static LOG: std::sync::Mutex<Option<File>> = std::sync::Mutex::new(None);
+static STARTED: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+
+fn log(msg: impl std::fmt::Display) {
+    let secs = STARTED.get_or_init(Instant::now).elapsed().as_secs_f32();
+    if let Some(f) = LOG.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        let _ = writeln!(f, "[{secs:7.2}s] {msg}");
+    }
+}
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -42,9 +54,24 @@ fn main() -> ExitCode {
         eprintln!("{USAGE}");
         return ExitCode::from(2);
     };
+    if let Some(path) = value("--log") {
+        if let Ok(f) = File::options().create(true).append(true).open(path) {
+            *LOG.lock().unwrap() = Some(f);
+        }
+    }
+    STARTED.get_or_init(Instant::now);
+    std::panic::set_hook(Box::new(|info| log(format!("panic: {info}"))));
+    log(format!(
+        "inphiso-helper {} started",
+        env!("CARGO_PKG_VERSION")
+    ));
     match run(&socket, token) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(()) => {
+            log("finished");
+            ExitCode::SUCCESS
+        }
         Err(e) => {
+            log(format!("error: {e:#}"));
             eprintln!("inphiso-helper: {e:#}");
             ExitCode::FAILURE
         }
@@ -65,8 +92,12 @@ fn run(socket: &str, token: String) -> Result<()> {
     )?;
     let job = match recv::<AppMsg>(&mut rx)? {
         Some(AppMsg::Start { job }) => job,
-        Some(AppMsg::Cancel) | None => return Ok(()),
+        Some(AppMsg::Cancel) | None => {
+            log("cancelled before starting");
+            return Ok(());
+        }
     };
+    log(format!("job: {job:?}"));
 
     // Watch for Cancel. If the app goes away mid-flash, stop too: nobody is
     // left to see the result.
@@ -76,7 +107,14 @@ fn run(socket: &str, token: String) -> Result<()> {
         std::thread::spawn(move || {
             loop {
                 match recv::<AppMsg>(&mut rx) {
-                    Ok(Some(AppMsg::Cancel)) | Ok(None) | Err(_) => break,
+                    Ok(Some(AppMsg::Cancel)) => {
+                        log("cancel requested");
+                        break;
+                    }
+                    Ok(None) | Err(_) => {
+                        log("the app closed the connection; stopping");
+                        break;
+                    }
                     Ok(Some(AppMsg::Start { .. })) => continue,
                 }
             }
@@ -85,9 +123,23 @@ fn run(socket: &str, token: String) -> Result<()> {
     }
 
     let started = Instant::now();
-    let result = flash(&job, &cancel, &mut |progress| {
-        let _ = send(&mut tx, &HelperMsg::Progress { progress });
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        flash(&job, &cancel, &mut |progress| {
+            let _ = send(&mut tx, &HelperMsg::Progress { progress });
+        })
+    }))
+    .unwrap_or_else(|panic| {
+        let what = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .unwrap_or("unknown panic");
+        Err(anyhow::anyhow!("the writer crashed: {what}"))
     });
+    match &result {
+        Ok(_) => log("flash done"),
+        Err(e) => log(format!("flash ended: {e:#}")),
+    }
     let msg = match result {
         Ok(verified) => HelperMsg::Done {
             elapsed_ms: started.elapsed().as_millis() as u64,
@@ -157,8 +209,16 @@ fn flash(job: &Job, cancel: &AtomicBool, on_progress: OnProgress) -> Result<bool
         }
     }
 
+    log(format!(
+        "image opened: {compression:?}, {} bytes to write",
+        image_size.map_or("unknown".into(), |s| s.to_string())
+    ));
     let device = inphiso_platform::open_for_writing(&job.device, job.device_size)?;
     let (size, sector) = (device.size(), device.sector());
+    log(format!(
+        "drive opened: {} bytes, {sector}-byte sectors",
+        size
+    ));
     let mut drive = Drive(device);
 
     match job.mode {
