@@ -3,10 +3,15 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod channel;
+pub mod device;
+pub mod elevate;
 pub mod linux;
 pub mod macos;
 #[cfg(windows)]
 pub mod windows;
+
+pub use device::{eject, open_for_writing, Device};
 
 /// A whole physical disk that could be flashed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,7 +42,11 @@ pub enum Error {
     Parse { what: &'static str, detail: String },
     #[error(transparent)]
     Io(#[from] std::io::Error),
-    #[error("drive listing isn't supported on this OS")]
+    #[error("{0}")]
+    Refused(String),
+    #[error("Permission to write to the drive was not given.")]
+    AuthCancelled,
+    #[error("this isn't supported on this OS")]
     Unsupported,
 }
 

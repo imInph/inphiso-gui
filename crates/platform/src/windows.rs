@@ -40,6 +40,14 @@ impl Drop for OwnedHandle {
 
 /// Opens a device path for IOCTLs with the given access mask.
 pub fn open_device(path: &str, access: u32) -> windows::core::Result<OwnedHandle> {
+    open_device_with(path, access, FILE_FLAGS_AND_ATTRIBUTES(0))
+}
+
+pub fn open_device_with(
+    path: &str,
+    access: u32,
+    flags: FILE_FLAGS_AND_ATTRIBUTES,
+) -> windows::core::Result<OwnedHandle> {
     let h = unsafe {
         CreateFileW(
             &HSTRING::from(path),
@@ -47,20 +55,25 @@ pub fn open_device(path: &str, access: u32) -> windows::core::Result<OwnedHandle
             FILE_SHARE_READ | FILE_SHARE_WRITE,
             None,
             OPEN_EXISTING,
-            FILE_FLAGS_AND_ATTRIBUTES(0),
+            flags,
             None,
         )?
     };
     Ok(OwnedHandle(h))
 }
 
-/// Runs an IOCTL with no input into an 8-byte-aligned buffer of `len` bytes.
-fn ioctl_out(h: &OwnedHandle, code: u32, input: Option<&[u8]>, len: usize) -> Option<Vec<u64>> {
+/// Runs an IOCTL into an 8-byte-aligned buffer of `len` bytes.
+pub(crate) fn ioctl_out(
+    h: HANDLE,
+    code: u32,
+    input: Option<&[u8]>,
+    len: usize,
+) -> Option<Vec<u64>> {
     let mut buf = vec![0u64; len.div_ceil(8)];
     let mut returned = 0u32;
     unsafe {
         DeviceIoControl(
-            h.0,
+            h,
             code,
             input.map(|i| i.as_ptr() as *const c_void),
             input.map_or(0, |i| i.len() as u32),
@@ -108,7 +121,7 @@ fn query_props(h: &OwnedHandle) -> Option<DiskProps> {
             size_of::<STORAGE_PROPERTY_QUERY>(),
         )
     };
-    let buf = ioctl_out(h, IOCTL_STORAGE_QUERY_PROPERTY, Some(input), 1024)?;
+    let buf = ioctl_out(h.0, IOCTL_STORAGE_QUERY_PROPERTY, Some(input), 1024)?;
     let bytes = unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const u8, buf.len() * 8) };
     let desc = unsafe { &*(buf.as_ptr() as *const STORAGE_DEVICE_DESCRIPTOR) };
     let vendor = ascii_at(bytes, desc.VendorIdOffset);
@@ -120,10 +133,14 @@ fn query_props(h: &OwnedHandle) -> Option<DiskProps> {
     })
 }
 
-fn disk_size(h: &OwnedHandle) -> Option<u64> {
-    let buf = ioctl_out(h, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, None, 256)?;
+/// Disk size and logical sector size.
+pub(crate) fn geometry(h: &OwnedHandle) -> Option<(u64, u64)> {
+    let buf = ioctl_out(h.0, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, None, 256)?;
     let geo = unsafe { &*(buf.as_ptr() as *const DISK_GEOMETRY_EX) };
-    u64::try_from(geo.DiskSize).ok()
+    Some((
+        u64::try_from(geo.DiskSize).ok()?,
+        u64::from(geo.Geometry.BytesPerSector),
+    ))
 }
 
 fn bus_label(bus: STORAGE_BUS_TYPE) -> Option<String> {
@@ -138,11 +155,13 @@ fn bus_label(bus: STORAGE_BUS_TYPE) -> Option<String> {
     Some(label.into())
 }
 
-struct VolumeInfo {
-    disks: Vec<u32>,
+pub(crate) struct VolumeInfo {
+    /// `\\?\Volume{...}` without the trailing backslash: openable as a device.
+    pub device: String,
+    pub disks: Vec<u32>,
     /// "C:\", "E:\" ...
-    paths: Vec<String>,
-    label: Option<String>,
+    pub paths: Vec<String>,
+    pub label: Option<String>,
 }
 
 fn utf16_until_nul(buf: &[u16]) -> String {
@@ -156,7 +175,7 @@ fn volume_info(guid_path: &str) -> VolumeInfo {
     let mut disks = Vec::new();
     if let Ok(h) = open_device(device, 0) {
         let len = size_of::<VOLUME_DISK_EXTENTS>() + 31 * size_of::<DISK_EXTENT>();
-        if let Some(buf) = ioctl_out(&h, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, None, len) {
+        if let Some(buf) = ioctl_out(h.0, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, None, len) {
             let ext = unsafe { &*(buf.as_ptr() as *const VOLUME_DISK_EXTENTS) };
             let n = (ext.NumberOfDiskExtents as usize).min(32);
             let first = ext.Extents.as_ptr();
@@ -195,13 +214,14 @@ fn volume_info(guid_path: &str) -> VolumeInfo {
     .filter(|l| !l.is_empty());
 
     VolumeInfo {
+        device: device.to_string(),
         disks,
         paths,
         label,
     }
 }
 
-fn all_volumes() -> Vec<VolumeInfo> {
+pub(crate) fn all_volumes() -> Vec<VolumeInfo> {
     let mut out = Vec::new();
     let mut buf = vec![0u16; 64];
     let Ok(find) = (unsafe { FindFirstVolumeW(&mut buf) }) else {
@@ -256,7 +276,7 @@ pub fn list() -> Result<Vec<Drive>> {
         let Some(props) = query_props(&h) else {
             continue;
         };
-        let Some(size) = disk_size(&h).filter(|&s| s > 0) else {
+        let Some(size) = geometry(&h).map(|g| g.0).filter(|&s| s > 0) else {
             continue; // empty card reader slot
         };
         let removable = props.removable_media
