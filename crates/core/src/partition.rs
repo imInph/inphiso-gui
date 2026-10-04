@@ -82,6 +82,8 @@ fn mbr_entry(e: &mut [u8], active: bool, kind: u8, start_lba: u64, sectors: u64)
 
 fn mbr(layout: Layout, sector: u64, disk_id: [u8; 4]) -> Vec<u8> {
     let mut b = vec![0u8; sector as usize];
+    // Boot code for legacy BIOS: chain-loads the active partition. UEFI ignores it.
+    b[..crate::bootcode::MBR.len()].copy_from_slice(crate::bootcode::MBR);
     b[440..444].copy_from_slice(&disk_id);
     // 0x0C: FAT32 with LBA addressing. Active so BIOS-era tools see it as bootable.
     mbr_entry(

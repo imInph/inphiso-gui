@@ -4,6 +4,7 @@
 
 pub mod blockcache;
 pub mod blockio;
+pub mod bootcode;
 pub mod checksum;
 pub mod image;
 pub mod ipc;

@@ -2,7 +2,8 @@
 //!
 //! Windows ISOs aren't hybrid images, so they can't be written raw. Instead:
 //! partition the drive, format the partition FAT32, and copy the ISO's files
-//! across. `sources/install.wim` is usually over FAT32's 4 GiB file limit, so
+//! across. UEFI firmware boots `efi/boot/bootx64.efi` from it; on MBR drives
+//! our own boot code (see `bootcode`) also lets legacy BIOS load `bootmgr`. `sources/install.wim` is usually over FAT32's 4 GiB file limit, so
 //! it's split into `install.swm`, `install2.swm`, ... which Windows Setup
 //! reassembles by itself.
 //!
@@ -236,7 +237,13 @@ pub fn write_windows<R: Read + Seek>(
         cache.flush_all()?;
     }
 
-    // 3. The partition table, last.
+    // 3. Legacy BIOS boot code. BIOS firmware only boots MBR disks.
+    if job.scheme == PartitionScheme::Mbr {
+        crate::bootcode::install_vbr(dev, layout.start, sector)?;
+        dev.sync()?;
+    }
+
+    // 4. The partition table, last.
     check_cancel(cancel)?;
     let mut random = [0u8; 36];
     getrandom::fill(&mut random).map_err(io_err)?;
@@ -529,5 +536,108 @@ mod tests {
             &mut |_| {},
         )
         .unwrap();
+    }
+
+    /// Writes an MBR stick whose `bootmgr` is `bootmgr`, boots it in QEMU (SeaBIOS)
+    /// and returns QEMU's exit code and serial output. None when QEMU or a UDF
+    /// tool is missing.
+    fn boot_in_qemu(bootmgr: &[u8]) -> Option<(Option<i32>, String)> {
+        let qemu = ["qemu-system-i386", "qemu-system-x86_64"]
+            .into_iter()
+            .find(|q| {
+                std::process::Command::new(q)
+                    .arg("--version")
+                    .output()
+                    .is_ok()
+            })?;
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        std::fs::create_dir_all(src.join("sources")).unwrap();
+        std::fs::create_dir_all(src.join("efi/boot")).unwrap();
+        // Enough root entries (with long names) that the directory spans several
+        // sectors and clusters before BOOTMGR's entry.
+        for i in 0..60 {
+            std::fs::write(src.join(format!("aa-some-long-file-name-{i:02}.txt")), b"x").unwrap();
+        }
+        std::fs::write(src.join("bootmgr"), bootmgr).unwrap();
+        std::fs::write(src.join("efi/boot/bootx64.efi"), b"efi").unwrap();
+        std::fs::write(src.join("sources/install.wim"), b"wim").unwrap();
+        let iso = dir.path().join("win.iso");
+        if !make_udf(&src, &iso) {
+            return None;
+        }
+
+        let img = dir.path().join("stick.img");
+        let size = 256 * partition::MIB;
+        let mut dev = File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&img)
+            .unwrap();
+        dev.set_len(size).unwrap();
+        let splitter = ChunkSplitter(1 << 20);
+        write_windows(
+            File::open(&iso).unwrap(),
+            &mut dev,
+            size,
+            512,
+            &job(PartitionScheme::Mbr, dir.path(), &splitter, FAT32_MAX_FILE),
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
+        drop(dev);
+
+        let serial = dir.path().join("serial.txt");
+        let mut child = std::process::Command::new(qemu)
+            .arg("-drive")
+            .arg(format!("file={},format=raw,if=ide", img.display()))
+            .args(["-m", "64", "-display", "none", "-no-reboot"])
+            .args(["-device", "isa-debug-exit,iobase=0xf4,iosize=0x04"])
+            .arg("-serial")
+            .arg(format!("file:{}", serial.display()))
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let status = loop {
+            if let Some(s) = child.try_wait().unwrap() {
+                break s;
+            }
+            if std::time::Instant::now() > deadline {
+                let _ = child.kill();
+                panic!("QEMU didn't finish booting in time");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        };
+        Some((
+            status.code(),
+            std::fs::read_to_string(&serial).unwrap_or_default(),
+        ))
+    }
+
+    /// The stand-in BOOTMGR, padded to 448 KiB with its check value in the last 4 bytes.
+    fn test_bootmgr(magic: u32) -> Vec<u8> {
+        let mut b = include_bytes!("../boot/test_bootmgr.bin").to_vec();
+        b.resize(0x70000 - 4, 0);
+        b.extend_from_slice(&magic.to_le_bytes());
+        b
+    }
+
+    #[test]
+    fn legacy_bios_loads_bootmgr_under_qemu() {
+        // isa-debug-exit: the stand-in writes 1 (QEMU exits 3) when it was loaded
+        // correctly, 2 (exits 5) when something is off.
+        let Some((code, serial)) = boot_in_qemu(&test_bootmgr(0x4f53_4950)) else {
+            eprintln!("skipping: QEMU or a UDF tool isn't installed");
+            return;
+        };
+        assert_eq!(code, Some(3), "BIOS boot failed; serial: {serial:?}");
+        assert!(serial.contains("OK"), "serial: {serial:?}");
+
+        // And the check really checks: a BOOTMGR whose tail didn't arrive intact fails.
+        let (code, _) = boot_in_qemu(&test_bootmgr(0xdead_beef)).unwrap();
+        assert_eq!(code, Some(5));
     }
 }
