@@ -80,16 +80,23 @@ fn main() -> ExitCode {
 
 fn run(socket: &str, token: String) -> Result<()> {
     let stream = inphiso_platform::channel::connect(socket).context("connecting to inphiso")?;
-    let (rx, mut tx) = stream.split();
-    let mut rx = BufReader::new(rx);
-
     send(
-        &mut tx,
+        &mut &stream,
         &HelperMsg::Hello {
             token,
             version: env!("CARGO_PKG_VERSION").into(),
         },
     )?;
+    // The app opens the image (it has the user's file permissions) and passes it over.
+    #[cfg(unix)]
+    let image_file =
+        inphiso_platform::channel::recv_file(inphiso_platform::channel::raw_fd(&stream))
+            .context("receiving the image from inphiso")?;
+    #[cfg(not(unix))]
+    let image_file: Option<File> = None;
+    log(format!("image handed over: {}", image_file.is_some()));
+    let (rx, mut tx) = stream.split();
+    let mut rx = BufReader::new(rx);
     let job = match recv::<AppMsg>(&mut rx)? {
         Some(AppMsg::Start { job }) => job,
         Some(AppMsg::Cancel) | None => {
@@ -124,7 +131,7 @@ fn run(socket: &str, token: String) -> Result<()> {
 
     let started = Instant::now();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        flash(&job, &cancel, &mut |progress| {
+        flash(&job, image_file, &cancel, &mut |progress| {
             let _ = send(&mut tx, &HelperMsg::Progress { progress });
         })
     }))
@@ -194,14 +201,22 @@ impl Target for Drive {
 type OnProgress<'a> = &'a mut dyn FnMut(inphiso_core::progress::Progress);
 
 /// Runs the job. Returns whether the result was verified.
-fn flash(job: &Job, cancel: &AtomicBool, on_progress: OnProgress) -> Result<bool> {
-    let meta = std::fs::metadata(&job.image)
-        .with_context(|| format!("couldn't open {}", job.image.display()))?;
-    if !meta.is_file() {
+fn flash(
+    job: &Job,
+    image_file: Option<File>,
+    cancel: &AtomicBool,
+    on_progress: OnProgress,
+) -> Result<bool> {
+    let file = match image_file {
+        Some(f) => f,
+        None => File::open(&job.image)
+            .with_context(|| format!("couldn't open {}", job.image.display()))?,
+    };
+    if !file.metadata()?.is_file() {
         bail!("{} isn't a regular file", job.image.display());
     }
     // Decompresses on the fly; the size is unknown for gzip/bzip2/zstd.
-    let (image, compression, image_size) = inphiso_core::image::open(&job.image)
+    let (image, compression, image_size) = inphiso_core::image::open_file(file.try_clone()?)
         .with_context(|| format!("couldn't read {}", job.image.display()))?;
     if let Mode::Windows { .. } = job.mode {
         if compression != Compression::None {
@@ -245,7 +260,9 @@ fn flash(job: &Job, cancel: &AtomicBool, on_progress: OnProgress) -> Result<bool
         }
         Mode::Windows { scheme } => {
             drop(image);
-            let iso = BufReader::with_capacity(1 << 20, File::open(&job.image)?);
+            let mut file = file;
+            file.seek(SeekFrom::Start(0))?;
+            let iso = BufReader::with_capacity(1 << 20, file);
             let temp_dir = big_temp_dir();
             let splitter = Wimlib(find_tool("wimlib-imagex"));
             let wjob = WindowsJob {

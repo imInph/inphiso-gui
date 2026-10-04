@@ -127,6 +127,13 @@ fn drive(state: &FlashState, job: FlashJob, events: &Channel<HelperMsg>) -> Opti
         Ok(j) => j,
         Err(e) => return fail(e),
     };
+    // Open the image here, with the user's permissions: on macOS the elevated
+    // helper isn't allowed to open files on external volumes or in protected
+    // folders, so it gets this open file instead (on Unix).
+    let image_file = match std::fs::File::open(&job.image) {
+        Ok(f) => f,
+        Err(e) => return fail(format!("couldn't open {}: {e}", job.image.display())),
+    };
     let helper = match helper_path() {
         Ok(p) => p,
         Err(e) => return fail(e),
@@ -178,6 +185,8 @@ fn drive(state: &FlashState, job: FlashJob, events: &Channel<HelperMsg>) -> Opti
         Err(e) => return fail(format!("the writer couldn't connect: {e}")),
     };
 
+    #[cfg(unix)]
+    let socket_fd = inphiso_platform::channel::raw_fd(&conn);
     let (rx, mut tx) = conn.split();
     let mut rx = BufReader::new(rx);
     match recv::<HelperMsg>(&mut rx) {
@@ -192,6 +201,12 @@ fn drive(state: &FlashState, job: FlashJob, events: &Channel<HelperMsg>) -> Opti
         _ => return fail("the writer didn't identify itself".into()),
     }
 
+    #[cfg(unix)]
+    if let Err(e) = inphiso_platform::channel::send_file(socket_fd, Some(&image_file)) {
+        return fail(format!("couldn't hand the image to the writer: {e}"));
+    }
+    #[cfg(not(unix))]
+    drop(image_file);
     if let Err(e) = send(&mut tx, &AppMsg::Start { job }) {
         return fail(format!("couldn't send the job to the writer: {e}"));
     }

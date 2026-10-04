@@ -67,7 +67,12 @@ pub fn decoder(file: File, compression: Compression) -> io::Result<Box<dyn Read 
 
 /// Opens an image for writing: the decompressed byte stream, plus its size if known.
 pub fn open(path: &Path) -> io::Result<(Box<dyn Read + Send>, Compression, Option<u64>)> {
-    let mut file = File::open(path)?;
+    open_file(File::open(path)?)
+}
+
+/// Like [`open`], for a file that's already open (handed over by the app).
+pub fn open_file(mut file: File) -> io::Result<(Box<dyn Read + Send>, Compression, Option<u64>)> {
+    file.seek(SeekFrom::Start(0))?;
     let mut magic = [0u8; 6];
     let n = read_full(&mut file, &mut magic)?;
     let compression = detect_compression(&magic[..n]);

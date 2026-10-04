@@ -116,6 +116,99 @@ pub fn connect(name: &str) -> io::Result<Stream> {
     }
 }
 
+/// The socket's file descriptor, for passing files across it.
+#[cfg(unix)]
+pub fn raw_fd(stream: &Stream) -> std::os::fd::RawFd {
+    use std::os::fd::AsRawFd;
+    #[allow(unreachable_patterns)]
+    match stream {
+        Stream::UdSocket(s) => s.inner().as_raw_fd(),
+        _ => unreachable!("local sockets are Unix sockets on Unix"),
+    }
+}
+
+/// Sends one marker byte over `socket`, carrying `file` along (SCM_RIGHTS) if given.
+///
+/// macOS checks privacy permissions (external volumes, Downloads, ...) when a
+/// file is opened, and the elevated helper can't be granted them. So the app,
+/// which can, opens the image and hands the helper the open file instead.
+#[cfg(unix)]
+pub fn send_file(socket: std::os::fd::RawFd, file: Option<&std::fs::File>) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    let mut byte = [u8::from(file.is_some())];
+    let mut iov = libc::iovec {
+        iov_base: byte.as_mut_ptr().cast(),
+        iov_len: 1,
+    };
+    let space = unsafe { libc::CMSG_SPACE(std::mem::size_of::<libc::c_int>() as u32) } as usize;
+    let mut control = vec![0u8; space];
+    let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+    msg.msg_iov = &mut iov;
+    msg.msg_iovlen = 1;
+    if let Some(file) = file {
+        msg.msg_control = control.as_mut_ptr().cast();
+        msg.msg_controllen = space as _;
+        unsafe {
+            let cmsg = libc::CMSG_FIRSTHDR(&msg);
+            (*cmsg).cmsg_level = libc::SOL_SOCKET;
+            (*cmsg).cmsg_type = libc::SCM_RIGHTS;
+            (*cmsg).cmsg_len = libc::CMSG_LEN(std::mem::size_of::<libc::c_int>() as u32) as _;
+            std::ptr::write_unaligned(
+                libc::CMSG_DATA(cmsg).cast::<libc::c_int>(),
+                file.as_raw_fd(),
+            );
+        }
+    }
+    if unsafe { libc::sendmsg(socket, &msg, 0) } != 1 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// Receives the marker byte from [`send_file`], and the file if one came along.
+#[cfg(unix)]
+pub fn recv_file(socket: std::os::fd::RawFd) -> io::Result<Option<std::fs::File>> {
+    use std::os::fd::FromRawFd;
+    let mut byte = [0u8; 1];
+    let mut iov = libc::iovec {
+        iov_base: byte.as_mut_ptr().cast(),
+        iov_len: 1,
+    };
+    let space = unsafe { libc::CMSG_SPACE(std::mem::size_of::<libc::c_int>() as u32) } as usize;
+    let mut control = vec![0u8; space];
+    let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+    msg.msg_iov = &mut iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = control.as_mut_ptr().cast();
+    msg.msg_controllen = space as _;
+    let n = unsafe { libc::recvmsg(socket, &mut msg, 0) };
+    if n < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if n == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "the app hung up",
+        ));
+    }
+    unsafe {
+        let cmsg = libc::CMSG_FIRSTHDR(&msg);
+        if !cmsg.is_null()
+            && (*cmsg).cmsg_level == libc::SOL_SOCKET
+            && (*cmsg).cmsg_type == libc::SCM_RIGHTS
+        {
+            let fd = std::ptr::read_unaligned(libc::CMSG_DATA(cmsg).cast::<libc::c_int>());
+            return Ok(Some(std::fs::File::from_raw_fd(fd)));
+        }
+    }
+    if byte[0] == 1 {
+        return Err(io::Error::other(
+            "expected a file from the app, none arrived",
+        ));
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,6 +245,38 @@ mod tests {
         BufReader::new(conn).read_line(&mut line).unwrap();
         assert_eq!(line, "late\n");
         client.join().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn passes_an_open_file_across() {
+        use std::io::{Read, Seek};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("image.img");
+        std::fs::write(&path, b"image bytes").unwrap();
+
+        let server = listen().unwrap();
+        let name = server.name.clone();
+        let client = std::thread::spawn(move || {
+            let s = connect(&name).unwrap();
+            let fd = raw_fd(&s);
+            let first = recv_file(fd).unwrap();
+            let second = recv_file(fd).unwrap();
+            (first, second)
+        });
+        let conn = server.accept_polling(|| None::<()>).unwrap().unwrap();
+        let file = std::fs::File::open(&path).unwrap();
+        // Remove the file: the receiver must still read it through the descriptor.
+        std::fs::remove_file(&path).unwrap();
+        send_file(raw_fd(&conn), Some(&file)).unwrap();
+        send_file(raw_fd(&conn), None).unwrap();
+        let (first, second) = client.join().unwrap();
+        let mut got = String::new();
+        let mut f = first.expect("a file arrives");
+        f.rewind().unwrap();
+        f.read_to_string(&mut got).unwrap();
+        assert_eq!(got, "image bytes");
+        assert!(second.is_none());
     }
 
     #[test]

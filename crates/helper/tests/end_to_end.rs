@@ -34,6 +34,8 @@ fn run_job(job_for: impl FnOnce() -> Job, cancel_after_first_progress: bool) -> 
 
     // Same polling accept the app uses, so its quirks are covered here too.
     let conn = server.accept_polling(|| None::<()>).unwrap().unwrap();
+    #[cfg(unix)]
+    let fd = inphiso_platform::channel::raw_fd(&conn);
     let (rx, mut tx) = conn.split();
     let mut rx = BufReader::new(rx);
 
@@ -41,7 +43,14 @@ fn run_job(job_for: impl FnOnce() -> Job, cancel_after_first_progress: bool) -> 
         Some(HelperMsg::Hello { token: t, .. }) => assert_eq!(t, token),
         other => panic!("expected hello, got {other:?}"),
     }
-    send(&mut tx, &AppMsg::Start { job: job_for() }).unwrap();
+    let job = job_for();
+    // Like the app: hand over the open image when it exists, else let the helper try.
+    #[cfg(unix)]
+    {
+        let file = std::fs::File::open(&job.image).ok();
+        inphiso_platform::channel::send_file(fd, file.as_ref()).unwrap();
+    }
+    send(&mut tx, &AppMsg::Start { job }).unwrap();
 
     let mut msgs = Vec::new();
     while let Some(msg) = recv::<HelperMsg>(&mut rx).unwrap() {
