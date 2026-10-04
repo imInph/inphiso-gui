@@ -14,6 +14,7 @@ pub mod udf;
 #[cfg(test)]
 pub(crate) mod testutil;
 pub mod write_raw;
+pub mod write_windows;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -27,6 +28,8 @@ pub enum Error {
     VerifyMismatch,
     #[error("the drive ended early while reading it back")]
     ShortRead,
+    #[error("{0}")]
+    Unsupported(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }

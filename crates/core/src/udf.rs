@@ -77,6 +77,7 @@ pub struct Udf<R> {
     part_start: u64,
     block: u64,
     root_icb: u32,
+    label: String,
 }
 
 impl<R: Read + Seek> Udf<R> {
@@ -89,11 +90,16 @@ impl<R: Read + Seek> Udf<R> {
         let vds_loc = u32_at(&anchor, 20) as u64;
 
         let (mut part_start, mut block, mut fsd) = (None, SECTOR, None);
+        let mut label = String::new();
         for i in 0..(vds_len / SECTOR).min(64) {
             let d = read_sector(&mut r, vds_loc + i, SECTOR)?;
             match tag_id(&d) {
                 Some(TAG_PARTITION) => part_start = Some(u32_at(&d, 188) as u64),
                 Some(TAG_LOGICAL_VOLUME) => {
+                    // Logical Volume Identifier: a 128-byte dstring whose last byte is its length.
+                    let id = &d[84..212];
+                    let used = (id[127] as usize).min(127);
+                    label = decode_dstring(&id[..used]);
                     block = u32_at(&d, 212) as u64;
                     // long_ad of the File Set Descriptor in Logical Volume Contents Use.
                     fsd = Some(u32_at(&d, 252));
@@ -121,6 +127,7 @@ impl<R: Read + Seek> Udf<R> {
             part_start,
             block,
             root_icb: 0,
+            label,
         };
         let fs = udf.read_block(fsd)?;
         if tag_id(&fs) != Some(TAG_FILE_SET) {
@@ -261,6 +268,11 @@ impl<R: Read + Seek> Udf<R> {
             });
         }
         Ok(out)
+    }
+
+    /// The volume name, e.g. `CCCOMA_X64FRE_EN-US_DV9`.
+    pub fn volume_label(&self) -> &str {
+        &self.label
     }
 
     pub fn root(&self) -> Entry {
