@@ -5,7 +5,6 @@
 // No console window flashing up behind the UAC prompt on Windows.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -143,12 +142,14 @@ fn flash(
         bail!("Writing Windows installer images isn't supported yet.");
     }
 
-    let image =
-        File::open(&job.image).with_context(|| format!("couldn't open {}", job.image.display()))?;
-    let meta = image.metadata()?;
+    let meta = std::fs::metadata(&job.image)
+        .with_context(|| format!("couldn't open {}", job.image.display()))?;
     if !meta.is_file() {
         bail!("{} isn't a regular file", job.image.display());
     }
+    // Decompresses on the fly; the size is unknown for gzip/bzip2/zstd.
+    let (image, _, image_size) = inphiso_core::image::open(&job.image)
+        .with_context(|| format!("couldn't read {}", job.image.display()))?;
 
     let device = inphiso_platform::open_for_writing(&job.device, job.device_size)?;
     let (size, sector) = (device.size(), device.sector());
@@ -157,7 +158,7 @@ fn flash(
     let out = write_image(
         image,
         &mut drive,
-        Some(meta.len()),
+        image_size,
         size,
         sector,
         cancel,
