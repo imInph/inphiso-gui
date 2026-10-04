@@ -88,13 +88,23 @@ fn run(socket: &str, token: String) -> Result<()> {
         },
     )?;
     // The app opens the image (it has the user's file permissions) and passes it over.
+    // On macOS it also opens the drive (through authopen) and passes that over.
     #[cfg(unix)]
-    let image_file =
-        inphiso_platform::channel::recv_file(inphiso_platform::channel::raw_fd(&stream))
-            .context("receiving the image from inphiso")?;
+    let (image_file, device_file) = {
+        let fd = inphiso_platform::channel::raw_fd(&stream);
+        let image =
+            inphiso_platform::channel::recv_file(fd).context("receiving the image from inphiso")?;
+        let device =
+            inphiso_platform::channel::recv_file(fd).context("receiving the drive from inphiso")?;
+        (image, device)
+    };
     #[cfg(not(unix))]
-    let image_file: Option<File> = None;
-    log(format!("image handed over: {}", image_file.is_some()));
+    let (image_file, device_file): (Option<File>, Option<File>) = (None, None);
+    log(format!(
+        "handed over: image {}, drive {}",
+        image_file.is_some(),
+        device_file.is_some()
+    ));
     let (rx, mut tx) = stream.split();
     let mut rx = BufReader::new(rx);
     let job = match recv::<AppMsg>(&mut rx)? {
@@ -131,7 +141,7 @@ fn run(socket: &str, token: String) -> Result<()> {
 
     let started = Instant::now();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        flash(&job, image_file, &cancel, &mut |progress| {
+        flash(&job, image_file, device_file, &cancel, &mut |progress| {
             let _ = send(&mut tx, &HelperMsg::Progress { progress });
         })
     }))
@@ -204,6 +214,7 @@ type OnProgress<'a> = &'a mut dyn FnMut(inphiso_core::progress::Progress);
 fn flash(
     job: &Job,
     image_file: Option<File>,
+    device_file: Option<File>,
     cancel: &AtomicBool,
     on_progress: OnProgress,
 ) -> Result<bool> {
@@ -228,7 +239,7 @@ fn flash(
         "image opened: {compression:?}, {} bytes to write",
         image_size.map_or("unknown".into(), |s| s.to_string())
     ));
-    let device = inphiso_platform::open_for_writing(&job.device, job.device_size)?;
+    let device = inphiso_platform::open_for_writing(&job.device, job.device_size, device_file)?;
     let (size, sector) = (device.size(), device.sector());
     log(format!(
         "drive opened: {} bytes, {sector}-byte sectors",

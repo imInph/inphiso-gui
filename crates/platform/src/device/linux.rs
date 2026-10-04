@@ -25,6 +25,10 @@ fn mounted_parts(id: &str) -> Result<Vec<String>> {
         .collect())
 }
 
+pub fn sector_size(id: &str) -> u64 {
+    logical_sector(id)
+}
+
 fn logical_sector(id: &str) -> u64 {
     let name = id.trim_start_matches("/dev/");
     std::fs::read_to_string(format!("/sys/block/{name}/queue/logical_block_size"))

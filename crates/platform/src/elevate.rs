@@ -22,7 +22,8 @@ pub fn run_elevated(program: &Path, args: &[String]) -> Result<()> {
     os_run_elevated(program, args)
 }
 
-fn run_direct(program: &Path, args: &[String]) -> Result<()> {
+/// Runs `program` as the current user and waits for it.
+pub fn run_direct(program: &Path, args: &[String]) -> Result<()> {
     let status = std::process::Command::new(program)
         .args(args)
         .status()

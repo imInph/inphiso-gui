@@ -75,8 +75,49 @@ impl Seek for Device {
     }
 }
 
-/// Validates `id`, unmounts everything on it and opens it for writing.
-pub fn open_for_writing(id: &str, expected_size: u64) -> Result<Device> {
+/// Checks `id` is still a listed (never the system) drive with the size the user saw.
+fn validate(id: &str, expected_size: u64) -> Result<crate::Drive> {
+    let listed = crate::list_drives(true)?
+        .into_iter()
+        .find(|d| d.id == id)
+        .ok_or_else(|| {
+            Error::Refused(format!(
+                "{id} isn't a drive inphiso can write to. Is it still plugged in?"
+            ))
+        })?;
+    if listed.size != expected_size {
+        return Err(Error::Refused(format!(
+            "{id} has changed size ({} → {} bytes). Pick the drive again.",
+            expected_size, listed.size
+        )));
+    }
+    Ok(listed)
+}
+
+/// Gets permission to write `id` from the app, before the helper starts.
+///
+/// On macOS this validates the drive, unmounts it and opens its raw device
+/// through `authopen`, which shows the system's admin prompt and hands back the
+/// open device. (Privacy rules stop a background process from opening a
+/// removable disk itself, even as root.) The app passes the device to the helper.
+/// Elsewhere it returns `None`: the elevated helper opens the drive itself.
+pub fn authorize(id: &str, expected_size: u64) -> Result<Option<File>> {
+    #[cfg(target_os = "macos")]
+    {
+        validate(id, expected_size)?;
+        os::unmount(id)?;
+        os::authopen(id).map(Some)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (id, expected_size);
+        Ok(None)
+    }
+}
+
+/// Validates `id`, unmounts everything on it and opens it for writing, or uses
+/// `handed`, the raw device the app already opened (see [`authorize`]).
+pub fn open_for_writing(id: &str, expected_size: u64, handed: Option<File>) -> Result<Device> {
     if cfg!(debug_assertions) && std::env::var(ALLOW_FILE_ENV).as_deref() == Ok("1") {
         if let Ok(meta) = std::fs::metadata(id) {
             if meta.is_file() {
@@ -94,22 +135,12 @@ pub fn open_for_writing(id: &str, expected_size: u64) -> Result<Device> {
         }
     }
 
-    let listed = crate::list_drives(true)?
-        .into_iter()
-        .find(|d| d.id == id)
-        .ok_or_else(|| {
-            Error::Refused(format!(
-                "{id} isn't a drive inphiso can write to. Is it still plugged in?"
-            ))
-        })?;
-    if listed.size != expected_size {
-        return Err(Error::Refused(format!(
-            "{id} has changed size ({} → {} bytes). Pick the drive again.",
-            expected_size, listed.size
-        )));
-    }
-
-    let (file, sector, guard) = os::prepare_and_open(id)?;
+    let listed = validate(id, expected_size)?;
+    let (file, sector, guard) = match handed {
+        #[allow(clippy::default_constructed_unit_structs)]
+        Some(file) => (file, os::sector_size(id), os::Guard::default()),
+        None => os::prepare_and_open(id)?,
+    };
     Ok(Device {
         file,
         size: listed.size,

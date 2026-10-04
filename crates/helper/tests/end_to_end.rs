@@ -49,6 +49,8 @@ fn run_job(job_for: impl FnOnce() -> Job, cancel_after_first_progress: bool) -> 
     {
         let file = std::fs::File::open(&job.image).ok();
         inphiso_platform::channel::send_file(fd, file.as_ref()).unwrap();
+        // No pre-opened drive: the helper opens the (file) target itself.
+        inphiso_platform::channel::send_file(fd, None).unwrap();
     }
     send(&mut tx, &AppMsg::Start { job }).unwrap();
 

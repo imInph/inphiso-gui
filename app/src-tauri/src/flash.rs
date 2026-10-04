@@ -134,6 +134,13 @@ fn drive(state: &FlashState, job: FlashJob, events: &Channel<HelperMsg>) -> Opti
         Ok(f) => f,
         Err(e) => return fail(format!("couldn't open {}: {e}", job.image.display())),
     };
+    // macOS: the drive is opened here through authopen (the admin prompt) and
+    // handed to the helper, which then doesn't need to run as root.
+    let device_file = match inphiso_platform::device::authorize(&job.device, job.device_size) {
+        Ok(f) => f,
+        Err(inphiso_platform::Error::AuthCancelled) => return Some(HelperMsg::Cancelled),
+        Err(e) => return fail(e.to_string()),
+    };
     let helper = match helper_path() {
         Ok(p) => p,
         Err(e) => return fail(e),
@@ -154,8 +161,14 @@ fn drive(state: &FlashState, job: FlashJob, events: &Channel<HelperMsg>) -> Opti
             "--log".to_string(),
             server.log_path.to_string_lossy().into_owned(),
         ];
+        let elevate = device_file.is_none();
         std::thread::spawn(move || {
-            let _ = done_tx.send(run_elevated(&helper, &args));
+            let result = if elevate {
+                run_elevated(&helper, &args)
+            } else {
+                inphiso_platform::elevate::run_direct(&helper, &args)
+            };
+            let _ = done_tx.send(result);
         });
     }
 
@@ -202,11 +215,16 @@ fn drive(state: &FlashState, job: FlashJob, events: &Channel<HelperMsg>) -> Opti
     }
 
     #[cfg(unix)]
-    if let Err(e) = inphiso_platform::channel::send_file(socket_fd, Some(&image_file)) {
-        return fail(format!("couldn't hand the image to the writer: {e}"));
+    {
+        use inphiso_platform::channel::send_file;
+        if let Err(e) = send_file(socket_fd, Some(&image_file))
+            .and_then(|_| send_file(socket_fd, device_file.as_ref()))
+        {
+            return fail(format!("couldn't hand the image to the writer: {e}"));
+        }
     }
     #[cfg(not(unix))]
-    drop(image_file);
+    drop((image_file, device_file));
     if let Err(e) = send(&mut tx, &AppMsg::Start { job }) {
         return fail(format!("couldn't send the job to the writer: {e}"));
     }

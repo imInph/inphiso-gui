@@ -58,6 +58,15 @@ fn lock_volumes(disk: u32) -> Result<Vec<OwnedHandle>> {
     Ok(locked)
 }
 
+pub fn sector_size(id: &str) -> u64 {
+    disk_number(id)
+        .ok()
+        .and_then(|_| open_device(id, 0).ok())
+        .and_then(|h| geometry(&h).map(|g| g.1))
+        .filter(|&s| s > 0)
+        .unwrap_or(512)
+}
+
 pub fn prepare_and_open(id: &str) -> Result<(File, u64, Guard)> {
     let volumes = lock_volumes(disk_number(id)?)?;
     let h = open_device_with(
