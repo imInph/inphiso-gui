@@ -112,8 +112,11 @@ export const mockBackend: Backend = {
     cancelled = true;
   },
 
-  async eject() {
+  async eject(driveId) {
     await sleep(200);
+    // Like the real thing: an ejected drive disappears from the list.
+    const i = drives.findIndex((d) => d.id === driveId);
+    if (i >= 0) drives.splice(i, 1);
   },
 
   onFileDrop() {

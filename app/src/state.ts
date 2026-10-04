@@ -31,6 +31,9 @@ export interface AppState {
   /** False until the first drive list arrives, so we don't flash "no drives". */
   drivesLoaded: boolean;
   pickedDriveId: string | null;
+  /** The drive being (or last) flashed, as it was when the flash started. Drives
+   *  vanish from the list when ejected, so later screens must not look it up there. */
+  flashedDrive: Drive | null;
   /** Write mode, resolved from the image or asked of the user. */
   mode: FlashMode | null;
   progress: Progress | null;
@@ -50,6 +53,7 @@ export const initialState: AppState = {
   drives: [],
   drivesLoaded: false,
   pickedDriveId: null,
+  flashedDrive: null,
   mode: null,
   progress: null,
   speeds: [],
@@ -72,7 +76,7 @@ export type Action =
   | { type: "pickDrive"; id: string }
   | { type: "setMode"; mode: FlashMode }
   | { type: "modal"; modal: Modal }
-  | { type: "flashStart" }
+  | { type: "flashStart"; drive: Drive }
   | { type: "flashEvent"; event: FlashEvent }
   | { type: "flashFailed"; message: string }
   | { type: "backToSelect" }
@@ -149,13 +153,16 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, checksumOverride: true };
 
     case "drives": {
+      // Only the picker screen follows hotplug. During and after a flash the
+      // selection stays put, so an ejected stick never gets swapped for another drive.
+      if (state.screen !== "select") {
+        return { ...state, drives: action.drives, drivesLoaded: true };
+      }
       const stillThere = action.drives.some((d) => d.id === state.pickedDriveId);
       let pickedDriveId = stillThere ? state.pickedDriveId : null;
       if (!pickedDriveId && state.image.kind === "ready") {
         pickedDriveId = autoPick(action.drives, state.image.info);
       }
-      // Don't yank the drive out from under a running flash.
-      if (state.screen === "writing") pickedDriveId = state.pickedDriveId;
       return { ...state, drives: action.drives, drivesLoaded: true, pickedDriveId };
     }
 
@@ -171,6 +178,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "flashStart":
       return {
         ...state,
+        flashedDrive: action.drive,
         screen: "writing",
         modal: null,
         progress: null,
@@ -211,8 +219,18 @@ export function reducer(state: AppState, action: Action): AppState {
     case "flashFailed":
       return { ...state, screen: "failed", error: action.message };
 
-    case "backToSelect":
-      return { ...state, screen: "select", progress: null, speeds: [], error: null };
+    case "backToSelect": {
+      // The drive may have been unplugged meanwhile; then the user picks again.
+      const stillThere = state.drives.some((d) => d.id === state.pickedDriveId);
+      return {
+        ...state,
+        screen: "select",
+        progress: null,
+        speeds: [],
+        error: null,
+        pickedDriveId: stillThere ? state.pickedDriveId : null,
+      };
+    }
 
     case "flashAnother":
       return { ...initialState, drives: state.drives, drivesLoaded: state.drivesLoaded };

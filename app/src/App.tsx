@@ -33,6 +33,8 @@ export default function App() {
 
   const image = state.image.kind === "ready" ? state.image.info : null;
   const pickedDrive = state.drives.find((d) => d.id === state.pickedDriveId);
+  // Fixed when the flash starts; the live list loses the drive once it's ejected.
+  const flashedDrive = state.flashedDrive;
 
   // Drive list, polled for hotplug.
   useEffect(() => {
@@ -137,7 +139,7 @@ export default function App() {
       partitionScheme: settings.partitionScheme,
     };
     setEjected(false);
-    dispatch({ type: "flashStart" });
+    dispatch({ type: "flashStart", drive: pickedDrive });
     const onEvent = (event: FlashEvent) => {
       dispatch({ type: "flashEvent", event });
       if (event.type === "done" && settings.ejectWhenDone) eject(job.driveId);
@@ -235,7 +237,7 @@ export default function App() {
           <Header
             right={
               <div className="header-meta mono">
-                {image && pickedDrive ? `${shortImageName(image.name)} → ${pickedDrive.name}` : ""}
+                {image && flashedDrive ? `${shortImageName(image.name)} → ${flashedDrive.name}` : ""}
               </div>
             }
           />
@@ -243,7 +245,7 @@ export default function App() {
             <Writing progress={state.progress} speeds={state.speeds} verify={settings.verify} mode={state.mode} />
           </main>
           <footer className="footer">
-            <div className="footer-note mono">{pickedDrive?.id}</div>
+            <div className="footer-note mono">{flashedDrive?.id}</div>
             <button className="btn-outline lg" onClick={() => backend.cancelFlash()}>
               Cancel
             </button>
@@ -256,7 +258,7 @@ export default function App() {
           <Header />
           <Done
             image={image}
-            drive={pickedDrive}
+            drive={flashedDrive ?? undefined}
             checksum={state.checksum}
             elapsedMs={state.result.elapsedMs}
             verified={state.result.verified}
@@ -266,7 +268,7 @@ export default function App() {
               imageToken.current++;
               dispatch({ type: "flashAnother" });
             }}
-            onEject={() => state.pickedDriveId && eject(state.pickedDriveId)}
+            onEject={() => flashedDrive && eject(flashedDrive.id)}
           />
         </>
       )}
@@ -277,7 +279,12 @@ export default function App() {
           <Failed
             message={state.error ?? "Something went wrong."}
             onBack={() => dispatch({ type: "backToSelect" })}
-            onRetry={() => dispatch({ type: "modal", modal: "confirm" })}
+            onRetry={() =>
+              // Same drive still plugged in: confirm again. Otherwise pick a drive.
+              pickedDrive && pickedDrive.id === flashedDrive?.id
+                ? dispatch({ type: "modal", modal: "confirm" })
+                : dispatch({ type: "backToSelect" })
+            }
           />
         </>
       )}
