@@ -18,12 +18,22 @@ pub fn list() -> Result<Vec<Drive>> {
     // Older lsblk rejects the column, so fall back to the single MOUNTPOINT.
     let out = crate::run(
         "lsblk",
-        &["--json", "--bytes", "--output", &format!("{COLS},MOUNTPOINTS")],
+        &[
+            "--json",
+            "--bytes",
+            "--output",
+            &format!("{COLS},MOUNTPOINTS"),
+        ],
     )
     .or_else(|_| {
         crate::run(
             "lsblk",
-            &["--json", "--bytes", "--output", &format!("{COLS},MOUNTPOINT")],
+            &[
+                "--json",
+                "--bytes",
+                "--output",
+                &format!("{COLS},MOUNTPOINT"),
+            ],
         )
     })?;
     parse(&out)

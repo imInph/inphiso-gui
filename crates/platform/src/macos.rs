@@ -94,7 +94,11 @@ fn system_disks(root: &Dictionary) -> HashSet<String> {
 fn apfs_volumes(apfs: &Dictionary) -> HashMap<String, Vec<String>> {
     let mut out: HashMap<String, Vec<String>> = HashMap::new();
     let containers = apfs.get("Containers").and_then(Value::as_array);
-    for c in containers.into_iter().flatten().filter_map(Value::as_dictionary) {
+    for c in containers
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_dictionary)
+    {
         let names: Vec<String> = c
             .get("Volumes")
             .and_then(Value::as_array)
@@ -105,7 +109,11 @@ fn apfs_volumes(apfs: &Dictionary) -> HashMap<String, Vec<String>> {
             .map(String::from)
             .collect();
         let stores = c.get("PhysicalStores").and_then(Value::as_array);
-        for s in stores.into_iter().flatten().filter_map(Value::as_dictionary) {
+        for s in stores
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_dictionary)
+        {
             if let Some(id) = str_of(s, "DeviceIdentifier") {
                 out.entry(whole_of(id).to_string())
                     .or_default()
@@ -255,9 +263,11 @@ mod tests {
         );
         infos.insert(
             "disk4".into(),
-            dict(r#"{"Internal": false, "BusProtocol": "USB", "TotalSize": 1000204886016,
+            dict(
+                r#"{"Internal": false, "BusProtocol": "USB", "TotalSize": 1000204886016,
                      "IORegistryEntryName": "CT1000P3 PSSD8 Media", "VirtualOrPhysical": "Physical",
-                     "RemovableMediaOrExternalDevice": true}"#),
+                     "RemovableMediaOrExternalDevice": true}"#,
+            ),
         );
 
         let drives = build(&list, &apfs, &root, &infos);
