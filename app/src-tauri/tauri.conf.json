@@ -27,10 +27,17 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "nsis",
+      "app",
+      "dmg",
+      "deb",
+      "rpm",
+      "appimage"
+    ],
     "category": "Utility",
     "shortDescription": "Flash Windows and Linux images to USB drives",
-    "copyright": "\u00a9 2026 imInph",
+    "copyright": "© 2026 imInph",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -40,6 +47,67 @@
     ],
     "externalBin": [
       "binaries/inphiso-helper"
-    ]
+    ],
+    "publisher": "imInph",
+    "homepage": "https://github.com/imInph/inphiso-gui",
+    "license": "MIT",
+    "longDescription": "Flash Windows and Linux disk images to USB drives. Handles Windows installer ISOs (FAT32 with a split install.wim), compressed images, checksums and verification.",
+    "resources": {
+      "../../LICENSE": "LICENSE"
+    },
+    "windows": {
+      "nsis": {
+        "template": "../../installer/windows/installer.nsi",
+        "installMode": "currentUser",
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "../../installer/windows/header.bmp",
+        "sidebarImage": "../../installer/windows/splash.bmp",
+        "startMenuFolder": "inphiso"
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": "-",
+      "dmg": {
+        "background": "../../installer/macos/background.png",
+        "windowSize": {
+          "width": 660,
+          "height": 400
+        },
+        "appPosition": {
+          "x": 165,
+          "y": 190
+        },
+        "applicationFolderPosition": {
+          "x": 495,
+          "y": 190
+        }
+      }
+    },
+    "linux": {
+      "deb": {
+        "recommends": [
+          "wimtools",
+          "pkexec | policykit-1"
+        ],
+        "files": {
+          "/usr/share/polkit-1/actions/com.inphner.inphiso.policy": "../../installer/linux/com.inphner.inphiso.policy"
+        },
+        "section": "utils"
+      },
+      "rpm": {
+        "recommends": [
+          "wimlib-utils",
+          "polkit"
+        ],
+        "files": {
+          "/usr/share/polkit-1/actions/com.inphner.inphiso.policy": "../../installer/linux/com.inphner.inphiso.policy"
+        }
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    }
   }
 }

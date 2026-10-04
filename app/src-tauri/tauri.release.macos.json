@@ -1,0 +1,12 @@
+{
+  "bundle": {
+    "externalBin": [
+      "binaries/inphiso-helper",
+      "binaries/wimlib-imagex"
+    ],
+    "resources": {
+      "../../LICENSE": "LICENSE",
+      "binaries/wimlib-licenses/": "licenses/wimlib/"
+    }
+  }
+}

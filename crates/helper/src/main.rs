@@ -216,12 +216,19 @@ impl WimSplitter for Wimlib {
                 "wimlib-imagex is missing, so install.wim can't be split. Reinstall inphiso.",
             )
         })?;
-        let out = Command::new(tool)
-            .arg("split")
+        let mut cmd = Command::new(tool);
+        cmd.arg("split")
             .arg(wim)
             .arg(dest.join("install.swm"))
-            .arg(part_mib.to_string())
-            .output()?;
+            .arg(part_mib.to_string());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            // wimlib-imagex is a console program; don't flash a console window.
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        let out = cmd.output()?;
         if !out.status.success() {
             return Err(std::io::Error::other(
                 String::from_utf8_lossy(&out.stderr).trim().to_string(),
