@@ -19,7 +19,10 @@ unsafe impl Send for AlignedBuf {}
 
 impl AlignedBuf {
     pub fn new(len: usize) -> Self {
-        assert!(len > 0 && len % ALIGN == 0, "length must be a multiple of {ALIGN}");
+        assert!(
+            len > 0 && len.is_multiple_of(ALIGN),
+            "length must be a multiple of {ALIGN}"
+        );
         let layout = Layout::from_size_align(len, ALIGN).expect("valid layout");
         let ptr = unsafe { alloc_zeroed(layout) };
         assert!(!ptr.is_null(), "allocation failed");

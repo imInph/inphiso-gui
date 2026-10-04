@@ -89,7 +89,10 @@ impl Tracker {
         while self.samples.len() > 2 && now.duration_since(self.samples[0].0) > WINDOW {
             self.samples.pop_front();
         }
-        if self.last_emit.is_some_and(|t| now.duration_since(t) < EMIT_EVERY) {
+        if self
+            .last_emit
+            .is_some_and(|t| now.duration_since(t) < EMIT_EVERY)
+        {
             return None;
         }
         self.last_emit = Some(now);
@@ -153,7 +156,9 @@ mod tests {
         let start = t.samples[0].0;
         let at = |ms| start + Duration::from_millis(ms);
 
-        let first = t.advance_at(1_000_000, at(500)).expect("first event goes out");
+        let first = t
+            .advance_at(1_000_000, at(500))
+            .expect("first event goes out");
         assert!((first.speed - 2_000_000.0).abs() < 1.0);
         // 100 ms later: throttled.
         assert!(t.advance_at(1_000_000, at(600)).is_none());

@@ -59,10 +59,16 @@ pub fn write_image(
     cancel: &AtomicBool,
     on_progress: &mut dyn FnMut(Progress),
 ) -> Result<WriteOutcome> {
-    assert!(sector > 0 && ALIGN as u64 % sector == 0, "unsupported sector size {sector}");
+    assert!(
+        sector > 0 && (ALIGN as u64).is_multiple_of(sector),
+        "unsupported sector size {sector}"
+    );
     if let Some(t) = total {
         if t > drive_size {
-            return Err(Error::TooLarge { image: t, drive: drive_size });
+            return Err(Error::TooLarge {
+                image: t,
+                drive: drive_size,
+            });
         }
     }
 
@@ -91,7 +97,10 @@ pub fn write_image(
                 break;
             }
             if pos + n as u64 > drive_size {
-                return Err(Error::TooLarge { image: pos + n as u64, drive: drive_size });
+                return Err(Error::TooLarge {
+                    image: pos + n as u64,
+                    drive: drive_size,
+                });
             }
             hasher.update(&buf[..n]);
             let len = padded(n, pos, drive_size, sector);
@@ -208,7 +217,9 @@ mod tests {
         assert_eq!(res.unwrap().sha256, sha(&img));
         assert_eq!(&dev[..5000], &img[..]);
         // The wipe zeroed the rest of the head region.
-        assert!(dev[round_up(5000, 512) as usize..HEAD].iter().all(|&b| b == 0));
+        assert!(dev[round_up(5000, 512) as usize..HEAD]
+            .iter()
+            .all(|&b| b == 0));
     }
 
     #[test]
@@ -273,7 +284,14 @@ mod tests {
 
         let mut bad = dev.into_inner();
         bad[CHUNK / 2] ^= 1;
-        let res = verify(&mut Cursor::new(bad), out.bytes, &out.sha256, 512, &no, &mut |_| {});
+        let res = verify(
+            &mut Cursor::new(bad),
+            out.bytes,
+            &out.sha256,
+            512,
+            &no,
+            &mut |_| {},
+        );
         assert!(matches!(res, Err(Error::VerifyMismatch)));
     }
 

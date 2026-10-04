@@ -99,7 +99,9 @@ mod tests {
             image: "/tmp/ubuntu.iso".into(),
             device: "disk4".into(),
             device_size: 32_000_000_000,
-            mode: Mode::Windows { scheme: PartitionScheme::Gpt },
+            mode: Mode::Windows {
+                scheme: PartitionScheme::Gpt,
+            },
             verify: true,
         };
         let mut wire = Vec::new();
@@ -128,8 +130,15 @@ mod tests {
         assert_eq!(v["type"], "progress");
         assert_eq!(v["progress"]["etaSecs"], 7);
 
-        let d = serde_json::to_value(HelperMsg::Done { elapsed_ms: 5, verified: true }).unwrap();
-        assert_eq!(d, serde_json::json!({"type": "done", "elapsedMs": 5, "verified": true}));
+        let d = serde_json::to_value(HelperMsg::Done {
+            elapsed_ms: 5,
+            verified: true,
+        })
+        .unwrap();
+        assert_eq!(
+            d,
+            serde_json::json!({"type": "done", "elapsedMs": 5, "verified": true})
+        );
         let c = serde_json::to_value(HelperMsg::Cancelled).unwrap();
         assert_eq!(c, serde_json::json!({"type": "cancelled"}));
     }
