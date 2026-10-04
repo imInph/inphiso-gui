@@ -24,14 +24,21 @@ _srcdir() {
   echo "$srcdir/inphiso-gui-$pkgver"
 }
 
+# Keep npm's and cargo's caches inside the build directory.
+_env() {
+  export npm_config_cache="$srcdir/npm-cache"
+  export CARGO_HOME="$srcdir/cargo-home"
+}
+
 prepare() {
+  _env
   cd "$(_srcdir)/app"
   npm ci --no-audit --no-fund
 }
 
 build() {
+  _env
   cd "$(_srcdir)/app"
-  export CARGO_HOME="$srcdir/cargo-home"
   # Builds the frontend, the helper (into target/<triple>/release) and the app,
   # without making .deb/.rpm/AppImage bundles.
   npx tauri build --no-bundle
