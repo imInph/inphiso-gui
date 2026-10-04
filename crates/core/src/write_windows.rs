@@ -25,7 +25,7 @@ use crate::partition::{self, Layout};
 use crate::progress::{Phase, Progress, Tracker};
 use crate::udf::{Entry, Udf};
 use crate::write_raw::Target;
-use crate::{check_cancel, Error, Result};
+use crate::{check_cancel, Error, Result, StepExt};
 
 /// Largest file FAT32 can hold.
 pub const FAT32_MAX_FILE: u64 = u32::MAX as u64;
@@ -172,8 +172,9 @@ pub fn write_windows<R: Read + Seek>(
 
     // 1. Zero the area before the partition, which holds the old partition table.
     let zeros = AlignedBuf::new(partition::MIB as usize);
-    dev.seek(SeekFrom::Start(0))?;
-    dev.write_all(&zeros[..layout.start as usize])?;
+    dev.seek(SeekFrom::Start(0)).step("wiping the drive")?;
+    dev.write_all(&zeros[..layout.start as usize])
+        .step("wiping the drive")?;
 
     // 2. Format and fill the partition.
     {
@@ -184,7 +185,8 @@ pub fn write_windows<R: Read + Seek>(
                 .fat_type(FatType::Fat32)
                 .bytes_per_sector(sector as u16)
                 .volume_label(label),
-        )?;
+        )
+        .step("formatting the drive as FAT32")?;
         {
             let fs = FileSystem::new(&mut cache, FsOptions::new())?;
             let root = fs.root_dir();
@@ -232,15 +234,16 @@ pub fn write_windows<R: Read + Seek>(
                 });
             }
             drop(root);
-            fs.unmount()?;
+            fs.unmount().step("finishing the FAT32 volume")?;
         }
-        cache.flush_all()?;
+        cache.flush_all().step("flushing the drive")?;
     }
 
     // 3. Legacy BIOS boot code. BIOS firmware only boots MBR disks.
     if job.scheme == PartitionScheme::Mbr {
-        crate::bootcode::install_vbr(dev, layout.start, sector)?;
-        dev.sync()?;
+        crate::bootcode::install_vbr(dev, layout.start, sector)
+            .step("installing the BIOS boot code")?;
+        dev.sync().step("flushing the drive")?;
     }
 
     // 4. The partition table, last.
@@ -248,10 +251,11 @@ pub fn write_windows<R: Read + Seek>(
     let mut random = [0u8; 36];
     getrandom::fill(&mut random).map_err(io_err)?;
     for (offset, bytes) in partition::table(layout, drive_size, sector, job.scheme, random) {
-        dev.seek(SeekFrom::Start(offset))?;
-        dev.write_all(&bytes)?;
+        dev.seek(SeekFrom::Start(offset))
+            .step("writing the partition table")?;
+        dev.write_all(&bytes).step("writing the partition table")?;
     }
-    dev.sync()?;
+    dev.sync().step("flushing the drive")?;
 
     on_progress(tracker.snapshot());
     Ok(WindowsOutcome {

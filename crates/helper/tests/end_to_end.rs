@@ -244,3 +244,36 @@ fn real_image_to_a_file_target() {
     eprintln!("{} messages, last: {last:?}", msgs.len());
     assert!(matches!(last, HelperMsg::Done { .. }), "{last:?}");
 }
+
+/// Writes and verifies a generated image on a real raw device the user can open,
+/// such as an attached disk image:
+/// `INPHISO_E2E_DEVICE=/dev/rdisk7 INPHISO_E2E_DEVICE_SIZE=268435456 cargo test -p inphiso-helper raw_device -- --ignored`
+#[test]
+#[ignore]
+fn raw_device_round_trip() {
+    let (Ok(device), Ok(size)) = (
+        std::env::var("INPHISO_E2E_DEVICE"),
+        std::env::var("INPHISO_E2E_DEVICE_SIZE"),
+    ) else {
+        return;
+    };
+    let size: u64 = size.parse().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let image = dir.path().join("image.img");
+    write_file(&image, 120 * 1024 * 1024 + 777);
+    let msgs = run_job(
+        || Job {
+            image: image.clone(),
+            device: device.clone(),
+            device_size: size,
+            mode: Mode::Raw,
+            verify: true,
+        },
+        false,
+    );
+    let last = msgs.last().unwrap();
+    assert!(
+        matches!(last, HelperMsg::Done { verified: true, .. }),
+        "{last:?}"
+    );
+}

@@ -31,11 +31,29 @@ pub enum Error {
     ShortRead,
     #[error("{0}")]
     Unsupported(String),
+    /// Shown as "<what>: <cause>" by error chains (`{:#}`).
+    #[error("{what}")]
+    Step {
+        what: &'static str,
+        #[source]
+        source: std::io::Error,
+    },
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// Labels an I/O error with the step it happened in, so failures say where.
+pub(crate) trait StepExt<T> {
+    fn step(self, what: &'static str) -> Result<T>;
+}
+
+impl<T> StepExt<T> for std::io::Result<T> {
+    fn step(self, what: &'static str) -> Result<T> {
+        self.map_err(|source| Error::Step { what, source })
+    }
+}
 
 pub(crate) fn check_cancel(cancel: &AtomicBool) -> Result<()> {
     if cancel.load(Ordering::Relaxed) {

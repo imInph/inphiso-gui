@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 
 use crate::blockio::{read_full, round_up, AlignedBuf, ALIGN};
 use crate::progress::{Phase, Progress, Tracker};
-use crate::{check_cancel, Error, Result};
+use crate::{check_cancel, Error, Result, StepExt};
 
 /// Size of each read/write.
 pub const CHUNK: usize = 4 << 20;
@@ -78,11 +78,11 @@ pub fn write_image(
     // 1. Wipe the old partition table so the OS forgets the old layout.
     let mut head = AlignedBuf::new(HEAD);
     let wipe = padded(HEAD, 0, drive_size, sector);
-    dev.seek(SeekFrom::Start(0))?;
-    dev.write_all(&head[..wipe])?;
+    dev.seek(SeekFrom::Start(0)).step("wiping the drive")?;
+    dev.write_all(&head[..wipe]).step("wiping the drive")?;
 
     // 2. Hold back the image's own head.
-    let head_len = read_full(&mut src, &mut head)?;
+    let head_len = read_full(&mut src, &mut head).step("reading the image")?;
     hasher.update(&head[..head_len]);
     tracker.advance(head_len as u64);
 
@@ -92,7 +92,7 @@ pub fn write_image(
     if head_len == HEAD {
         loop {
             check_cancel(cancel)?;
-            let n = read_full(&mut src, &mut buf)?;
+            let n = read_full(&mut src, &mut buf).step("reading the image")?;
             if n == 0 {
                 break;
             }
@@ -105,7 +105,7 @@ pub fn write_image(
             hasher.update(&buf[..n]);
             let len = padded(n, pos, drive_size, sector);
             buf[n..len].fill(0);
-            dev.write_all(&buf[..len])?;
+            dev.write_all(&buf[..len]).step("writing to the drive")?;
             pos += n as u64;
             if let Some(p) = tracker.advance(n as u64) {
                 on_progress(p);
@@ -114,16 +114,18 @@ pub fn write_image(
                 break;
             }
         }
-        dev.sync()?;
+        dev.sync().step("flushing the drive")?;
     }
 
     // 4. Finally the head, which makes the drive's new layout appear all at once.
     check_cancel(cancel)?;
     let len = padded(head_len, 0, drive_size, sector);
     head[head_len..len].fill(0);
-    dev.seek(SeekFrom::Start(0))?;
-    dev.write_all(&head[..len])?;
-    dev.sync()?;
+    dev.seek(SeekFrom::Start(0))
+        .step("writing the partition table")?;
+    dev.write_all(&head[..len])
+        .step("writing the partition table")?;
+    dev.sync().step("flushing the drive")?;
 
     on_progress(tracker.snapshot());
     Ok(WriteOutcome {
@@ -144,14 +146,15 @@ pub fn verify(
     let mut hasher = Sha256::new();
     let mut tracker = Tracker::new(Phase::Verify, Some(bytes));
     let mut buf = AlignedBuf::new(CHUNK);
-    dev.seek(SeekFrom::Start(0))?;
+    dev.seek(SeekFrom::Start(0))
+        .step("reading the drive back")?;
     let mut done = 0u64;
     while done < bytes {
         check_cancel(cancel)?;
         let want = (bytes - done).min(CHUNK as u64) as usize;
         // Raw devices only read whole sectors; read the padded length, hash the real one.
         let read_len = round_up(want as u64, sector) as usize;
-        let n = read_full(dev, &mut buf[..read_len])?;
+        let n = read_full(dev, &mut buf[..read_len]).step("reading the drive back")?;
         if n < want {
             return Err(Error::ShortRead);
         }
