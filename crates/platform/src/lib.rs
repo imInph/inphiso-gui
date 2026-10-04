@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub mod channel;
 pub mod device;
 pub mod elevate;
+pub mod fs;
 pub mod linux;
 pub mod macos;
 #[cfg(windows)]
