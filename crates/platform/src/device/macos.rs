@@ -74,6 +74,23 @@ pub fn prepare_and_open(id: &str) -> Result<(File, u64, Guard)> {
     Ok((file, sector_size(id), Guard))
 }
 
+/// `File::sync_all` uses `F_FULLFSYNC` on macOS, which raw disk devices reject.
+/// Raw devices aren't cached, so `fsync` plus asking the drive to flush its own
+/// cache is the right thing.
+pub fn sync(file: &File) -> std::io::Result<()> {
+    /// `_IO('d', 22)`
+    const DKIOCSYNCHRONIZECACHE: libc::c_ulong = 0x2000_6416;
+    let fd = file.as_raw_fd();
+    if unsafe { libc::fsync(fd) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // Not every device (or a plain file in tests) supports it; fsync is what counts.
+    unsafe {
+        libc::ioctl(fd, DKIOCSYNCHRONIZECACHE);
+    }
+    Ok(())
+}
+
 pub fn after_write(_file: &File) {
     // Disk Arbitration notices the new partition table on its own.
 }

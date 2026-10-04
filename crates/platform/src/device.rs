@@ -19,8 +19,9 @@ mod os;
 #[path = "device/windows.rs"]
 mod os;
 
-/// Set to `1` to allow a regular file as the "device". Only honoured in debug
-/// builds (tests and development); release builds ignore it.
+/// Set to `1` to allow a regular file, or a `/dev/` node the user can already open
+/// (an attached disk image), as the "device". Only honoured in debug builds
+/// (tests and development); release builds ignore it.
 pub const ALLOW_FILE_ENV: &str = "INPHISO_DEV_ALLOW_FILE";
 
 /// An open whole disk (or test file), ready for sector-aligned I/O.
@@ -42,13 +43,14 @@ impl Device {
         self.sector
     }
 
+    /// Makes sure everything written has reached the drive.
     pub fn sync(&mut self) -> io::Result<()> {
-        self.file.sync_all()
+        os::sync(&self.file)
     }
 
     /// Flushes and asks the OS to re-read the new partition table.
     pub fn finish(self) -> io::Result<()> {
-        self.file.sync_all()?;
+        os::sync(&self.file)?;
         os::after_write(&self.file);
         Ok(())
     }
@@ -120,14 +122,19 @@ pub fn authorize(id: &str, expected_size: u64) -> Result<Option<File>> {
 pub fn open_for_writing(id: &str, expected_size: u64, handed: Option<File>) -> Result<Device> {
     if cfg!(debug_assertions) && std::env::var(ALLOW_FILE_ENV).as_deref() == Ok("1") {
         if let Ok(meta) = std::fs::metadata(id) {
-            if meta.is_file() {
+            // A regular file, or a device node the user can open (an attached disk image).
+            if meta.is_file() || id.starts_with("/dev/") {
                 // `Guard` is a unit struct on Unix but holds volume locks on Windows.
                 #[allow(clippy::default_constructed_unit_structs)]
                 let guard = os::Guard::default();
                 let file = File::options().read(true).write(true).open(id)?;
                 return Ok(Device {
                     file,
-                    size: meta.len(),
+                    size: if meta.is_file() {
+                        meta.len()
+                    } else {
+                        expected_size
+                    },
                     sector: 512,
                     guard,
                 });

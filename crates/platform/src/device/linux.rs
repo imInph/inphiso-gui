@@ -68,6 +68,10 @@ pub fn prepare_and_open(id: &str) -> Result<(File, u64, Guard)> {
     Ok((file, logical_sector(id), Guard))
 }
 
+pub fn sync(file: &File) -> io::Result<()> {
+    file.sync_all()
+}
+
 pub fn after_write(file: &File) {
     unsafe {
         libc::ioctl(file.as_raw_fd(), BLKRRPART as _);

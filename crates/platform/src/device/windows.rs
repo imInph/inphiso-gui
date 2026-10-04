@@ -83,6 +83,10 @@ pub fn prepare_and_open(id: &str) -> Result<(File, u64, Guard)> {
     Ok((file, sector, Guard { _volumes: volumes }))
 }
 
+pub fn sync(file: &File) -> std::io::Result<()> {
+    file.sync_all()
+}
+
 pub fn after_write(file: &File) {
     let _ = ioctl_out(
         HANDLE(file.as_raw_handle()),
