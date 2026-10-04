@@ -20,7 +20,8 @@ handles the stuff that usually breaks: Windows ISOs from macOS or Linux, oversiz
 - **Linux and hybrid ISOs, disk images:** written byte for byte, decompressing on the fly.
 - **Windows installer ISOs:** detected automatically, written as a FAT32 drive (MBR or GPT),
   with `install.wim` split into `.swm` parts when it's over 4 GiB. Windows Setup puts them
-  back together by itself.
+  back together by itself. MBR drives boot on both UEFI and legacy BIOS PCs, using inphiso's
+  own boot code (`crates/core/boot/`).
 - Verifies the drive by reading it back, then ejects it.
 - Asks for your password (or UAC) only for the write itself. The app never runs as admin.
 
@@ -29,7 +30,7 @@ handles the stuff that usually breaks: Windows ISOs from macOS or Linux, oversiz
 | Image | Legacy BIOS | UEFI |
 |---|---|---|
 | Linux / hybrid ISO | depends on the ISO | depends on the ISO |
-| Windows ISO | not yet | yes |
+| Windows ISO | yes (MBR, the default) | yes |
 
 ## Installing
 

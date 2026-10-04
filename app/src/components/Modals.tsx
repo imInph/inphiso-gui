@@ -83,7 +83,9 @@ export function ConfirmModal({
         <div className="summary-row">
           <span className="muted">Method</span>
           <span>
-            {mode === "raw" ? "Byte-for-byte copy" : `Windows installer · FAT32 · ${scheme.toUpperCase()} · UEFI`}
+            {mode === "raw"
+              ? "Byte-for-byte copy"
+              : `Windows installer · FAT32 · ${scheme.toUpperCase()} · ${scheme === "mbr" ? "UEFI + BIOS" : "UEFI"}`}
           </span>
         </div>
       </div>
@@ -259,7 +261,7 @@ export function SettingsModal({
         <div className="setting">
           <div>
             <div className="setting-label">Windows partition scheme</div>
-            <div className="setting-hint">MBR works on the most machines. Pick GPT if your firmware insists.</div>
+            <div className="setting-hint">MBR boots on both UEFI and legacy BIOS PCs. GPT is UEFI only.</div>
           </div>
           <div className="segmented">
             {(["mbr", "gpt"] as const).map((s) => (
