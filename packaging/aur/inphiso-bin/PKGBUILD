@@ -1,0 +1,38 @@
+# Maintainer: imInph <inph at inphner dot com>
+#
+# Repackages the prebuilt Linux release. The AUR workflow
+# (.github/workflows/aur.yml) sets pkgver and the checksums on each release.
+
+pkgname=inphiso-bin
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Flash Windows and Linux disk images to USB drives"
+arch=('x86_64' 'aarch64')
+url="https://github.com/imInph/inphiso-gui"
+license=('GPL-3.0-or-later')
+depends=('webkit2gtk-4.1' 'gtk3' 'polkit' 'gcc-libs' 'glibc')
+optdepends=('wimlib: flash Windows ISOs whose install.wim is over 4 GB')
+provides=('inphiso')
+conflicts=('inphiso')
+source_x86_64=("$url/releases/download/v$pkgver/inphiso_${pkgver}_amd64.tar.gz")
+source_aarch64=("$url/releases/download/v$pkgver/inphiso_${pkgver}_arm64.tar.gz")
+sha256sums_x86_64=('SKIP')
+sha256sums_aarch64=('SKIP')
+
+package() {
+  local debarch
+  case "$CARCH" in
+    x86_64) debarch=amd64 ;;
+    aarch64) debarch=arm64 ;;
+  esac
+  cd "inphiso_${pkgver}_${debarch}"
+
+  # The app looks for its helper next to itself; the polkit policy expects /usr/bin.
+  install -Dm755 inphiso "$pkgdir/usr/bin/inphiso"
+  install -Dm755 inphiso-helper "$pkgdir/usr/bin/inphiso-helper"
+  install -Dm644 com.inphner.inphiso.policy \
+    "$pkgdir/usr/share/polkit-1/actions/com.inphner.inphiso.policy"
+  install -Dm644 inphiso.desktop "$pkgdir/usr/share/applications/inphiso.desktop"
+  install -Dm644 inphiso.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/inphiso.png"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

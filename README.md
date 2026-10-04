@@ -48,7 +48,15 @@ Builds aren't code-signed yet, so the OS will warn you the first time:
 - **macOS:** open the `.dmg` and drag inphiso to Applications. On first launch macOS will say
   it can't verify the developer: open *System Settings → Privacy & Security* and choose
   *Open Anyway*.
-- **Linux:** the `.deb` and `.rpm` pull in `wimtools` / `wimlib-utils` (for Windows ISOs) and
+- **Arch Linux and derivatives:** install from the AUR with an AUR helper:
+
+  ```bash
+  yay -S inphiso-bin     # prebuilt
+  yay -S inphiso         # built from source
+  ```
+
+  Add `wimlib` to flash Windows ISOs whose `install.wim` is over 4 GB.
+- **Other Linux:** the `.deb` and `.rpm` pull in `wimtools` / `wimlib-utils` (for Windows ISOs) and
   pkexec. With the AppImage or the `.tar.gz`, install `wimtools` yourself if you flash Windows
   ISOs. The `.tar.gz` runs in place (`./inphiso`) or installs to `/opt/inphiso` with
   `sudo ./install.sh`.

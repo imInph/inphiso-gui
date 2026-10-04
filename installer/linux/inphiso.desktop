@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=inphiso
+Comment=Flash Windows and Linux images to USB drives
+Exec=inphiso
+Icon=inphiso
+Categories=Utility;System;
+Keywords=usb;iso;flash;bootable;windows;linux;
+Terminal=false

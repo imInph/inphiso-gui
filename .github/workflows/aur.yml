@@ -1,0 +1,126 @@
+name: AUR
+
+# Builds the AUR packages with makepkg in an Arch Linux container.
+#
+# - Run by hand: test-builds both packages. `inphiso` is built from this commit;
+#   `inphiso-bin` from the given release version (skipped if there's none yet).
+# - On a published GitHub release: sets pkgver and checksums, builds both, and
+#   pushes them to the AUR when the AUR_SSH_PRIVATE_KEY secret is set.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version for inphiso-bin (e.g. 0.1.0). Leave empty to skip it.
+        required: false
+      publish:
+        description: Push to the AUR (needs the AUR_SSH_PRIVATE_KEY secret)
+        type: boolean
+        default: false
+
+jobs:
+  package:
+    name: ${{ matrix.pkg }}
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    strategy:
+      fail-fast: false
+      matrix:
+        pkg: [inphiso-bin, inphiso]
+    steps:
+      - name: Tools
+        run: pacman -Syu --noconfirm git openssh pacman-contrib
+
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: v
+        run: |
+          if [ "${{ github.event_name }}" = release ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="${{ inputs.version }}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare the PKGBUILD
+        id: prep
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/${{ matrix.pkg }}"
+          mkdir -p "$work"
+          cp packaging/aur/${{ matrix.pkg }}/PKGBUILD "$work/"
+          version="${{ steps.v.outputs.version }}"
+
+          if [ "${{ matrix.pkg }}" = inphiso ] && [ -z "$version" ]; then
+            # Test build of this commit: a local tarball laid out like GitHub's.
+            version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+            git config --global --add safe.directory "$PWD"
+            git archive --prefix="inphiso-gui-$version/" -o "$work/inphiso-$version.tar.gz" HEAD
+            sed -i "s|^source=.*|source=(\"inphiso-\$pkgver.tar.gz\")|" "$work/PKGBUILD"
+          elif [ -z "$version" ]; then
+            echo "No release version given; skipping ${{ matrix.pkg }}."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          sed -i "s/^pkgver=.*/pkgver=$version/; s/^pkgrel=.*/pkgrel=1/" "$work/PKGBUILD"
+          chown -R nobody "$work"
+          echo "work=$work" >> "$GITHUB_OUTPUT"
+
+      - name: Install build dependencies
+        if: steps.prep.outputs.skip != 'true'
+        working-directory: ${{ steps.prep.outputs.work }}
+        run: |
+          deps=$(sudo -u nobody bash -c 'source ./PKGBUILD; echo "${depends[@]} ${makedepends[@]}"')
+          pacman -S --noconfirm --needed $deps
+
+      - name: Checksums, .SRCINFO and build
+        if: steps.prep.outputs.skip != 'true'
+        working-directory: ${{ steps.prep.outputs.work }}
+        run: |
+          sudo -u nobody HOME="$PWD" updpkgsums
+          sudo -u nobody HOME="$PWD" makepkg --printsrcinfo > .SRCINFO
+          sudo -u nobody HOME="$PWD" makepkg --noconfirm --cleanbuild
+          ls -la *.pkg.tar.*
+          pacman -Qlp *.pkg.tar.zst
+
+      - uses: actions/upload-artifact@v4
+        if: steps.prep.outputs.skip != 'true'
+        with:
+          name: aur-${{ matrix.pkg }}
+          path: |
+            ${{ steps.prep.outputs.work }}/PKGBUILD
+            ${{ steps.prep.outputs.work }}/.SRCINFO
+
+      - name: Push to the AUR
+        if: >-
+          steps.prep.outputs.skip != 'true' &&
+          (github.event_name == 'release' || inputs.publish) &&
+          steps.v.outputs.version != ''
+        env:
+          AUR_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        working-directory: ${{ steps.prep.outputs.work }}
+        run: |
+          if [ -z "$AUR_KEY" ]; then
+            echo "::warning::AUR_SSH_PRIVATE_KEY isn't set; not publishing ${{ matrix.pkg }}."
+            exit 0
+          fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$AUR_KEY" > ~/.ssh/aur && chmod 600 ~/.ssh/aur
+          ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o IdentitiesOnly=yes"
+          git clone "ssh://aur@aur.archlinux.org/${{ matrix.pkg }}.git" aur
+          cp PKGBUILD .SRCINFO aur/
+          cd aur
+          git config user.name imInph
+          git config user.email inph@inphner.com
+          git add PKGBUILD .SRCINFO
+          if git diff --cached --quiet; then
+            echo "Nothing changed."
+          else
+            git commit -m "Update to ${{ steps.v.outputs.version }}"
+            git push origin HEAD:master
+          fi

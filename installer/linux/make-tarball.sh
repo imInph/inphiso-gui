@@ -29,16 +29,7 @@ install -m 644 installer/linux/com.inphner.inphiso.policy "$dir/"
 install -m 644 app/src-tauri/icons/128x128@2x.png "$dir/inphiso.png"
 install -m 644 LICENSE "$dir/LICENSE"
 
-cat > "$dir/inphiso.desktop" <<EOF
-[Desktop Entry]
-Type=Application
-Name=inphiso
-Comment=Flash Windows and Linux images to USB drives
-Exec=inphiso
-Icon=inphiso
-Categories=Utility;System;
-Terminal=false
-EOF
+install -m 644 installer/linux/inphiso.desktop "$dir/inphiso.desktop"
 
 cat > "$dir/README.txt" <<EOF
 inphiso $version for Linux ($arch)
