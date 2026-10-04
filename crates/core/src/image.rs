@@ -210,6 +210,27 @@ fn boot_label(bios: bool, efi: bool) -> Option<String> {
     }
 }
 
+/// Whether a UDF image has the Windows Setup layout: an install image under
+/// `sources/` and a boot manager.
+pub fn is_windows_installer(path: &Path) -> bool {
+    let Ok(file) = File::open(path) else {
+        return false;
+    };
+    let Ok(mut udf) = crate::udf::Udf::open(BufReader::new(file)) else {
+        return false;
+    };
+    let mut has = |p: &str| matches!(udf.lookup(p), Ok(Some(_)));
+    let install = [
+        "sources/install.wim",
+        "sources/install.esd",
+        "sources/install.swm",
+    ]
+    .iter()
+    .any(|p| has(p));
+    let boot = has("bootmgr") || has("efi/boot");
+    install && boot
+}
+
 pub fn inspect(path: &Path) -> io::Result<ImageInfo> {
     let meta = std::fs::metadata(path)?;
     if !meta.is_file() {
@@ -248,10 +269,12 @@ pub fn inspect(path: &Path) -> io::Result<ImageInfo> {
     };
 
     // A partition table up front means it's a disk image or hybrid ISO, written as-is.
-    // A bare ISO (no partition table) is usually a Windows installer; finding out for
-    // sure needs its file listing, so for now ask.
+    // A bare UDF image with the Windows Setup layout is a Windows installer. Anything
+    // else without a partition table, we ask about.
     let kind = if compression != Compression::None || p.mbr || p.gpt {
         Kind::Raw
+    } else if p.udf && is_windows_installer(path) {
+        Kind::Windows
     } else {
         Kind::Unknown
     };
@@ -412,5 +435,30 @@ mod tests {
         assert_eq!(info.kind, Kind::Unknown);
         assert_eq!(info.format, "ISO 9660");
         assert_eq!(info.name, "win.iso");
+    }
+
+    #[test]
+    fn recognises_windows_installers() {
+        let dir = tempfile::tempdir().unwrap();
+        let win = dir.path().join("win");
+        std::fs::create_dir_all(win.join("sources")).unwrap();
+        std::fs::create_dir_all(win.join("efi/boot")).unwrap();
+        std::fs::write(win.join("sources/install.wim"), b"wim").unwrap();
+        std::fs::write(win.join("bootmgr"), b"boot").unwrap();
+        let other = dir.path().join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(other.join("readme.txt"), b"hi").unwrap();
+
+        let (win_iso, other_iso) = (dir.path().join("win.iso"), dir.path().join("other.iso"));
+        if !crate::testutil::make_udf(&win, &win_iso) {
+            eprintln!("skipping: no UDF image tool");
+            return;
+        }
+        assert!(crate::testutil::make_udf(&other, &other_iso));
+
+        let info = inspect(&win_iso).unwrap();
+        assert_eq!(info.kind, Kind::Windows);
+        assert_eq!(info.format, "UDF");
+        assert_eq!(inspect(&other_iso).unwrap().kind, Kind::Unknown);
     }
 }
