@@ -297,6 +297,16 @@ fn split_wim<R: Read + Seek>(
             "splitting install.wim produced no parts".into(),
         ));
     }
+    // wimlib never splits a single file across parts, so one huge file inside
+    // the WIM can still leave a part over the FAT32 limit.
+    for part in &parts {
+        if std::fs::metadata(part)?.len() > FAT32_MAX_FILE {
+            return Err(Error::Unsupported(
+                "install.wim contains a single file over 4 GB, so it can't be split for FAT32."
+                    .into(),
+            ));
+        }
+    }
     Ok((work, parts))
 }
 

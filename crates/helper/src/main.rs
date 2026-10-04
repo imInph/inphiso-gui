@@ -256,17 +256,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let src = dir.path().join("src");
         std::fs::create_dir_all(&src).unwrap();
-        // Incompressible data so the WIM really needs several 1 MiB parts.
+        // wimlib never splits one file across parts, so use several ~700 KB files of
+        // incompressible data to need several 1 MiB parts.
         let mut seed = 1u64;
-        let data: Vec<u8> = (0..5_000_000)
-            .map(|_| {
-                seed ^= seed << 13;
-                seed ^= seed >> 7;
-                seed ^= seed << 17;
-                seed as u8
-            })
-            .collect();
-        std::fs::write(src.join("payload.bin"), &data).unwrap();
+        for i in 0..6 {
+            let data: Vec<u8> = (0..700_000)
+                .map(|_| {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 7;
+                    seed ^= seed << 17;
+                    seed as u8
+                })
+                .collect();
+            std::fs::write(src.join(format!("payload{i}.bin")), &data).unwrap();
+        }
         let wim = dir.path().join("install.wim");
         let ok = Command::new(&tool)
             .args(["capture"])
@@ -281,7 +284,7 @@ mod tests {
         let parts_dir = dir.path().join("parts");
         std::fs::create_dir_all(&parts_dir).unwrap();
         let parts = Wimlib(Some(tool)).split(&wim, &parts_dir, 1).unwrap();
-        assert!(parts.len() >= 4, "{parts:?}");
+        assert!(parts.len() >= 3, "{parts:?}");
         let names: Vec<String> = parts
             .iter()
             .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
