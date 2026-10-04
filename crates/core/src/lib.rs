@@ -7,6 +7,10 @@ pub mod checksum;
 pub mod image;
 pub mod ipc;
 pub mod progress;
+pub mod udf;
+
+#[cfg(test)]
+pub(crate) mod testutil;
 pub mod write_raw;
 
 use std::sync::atomic::{AtomicBool, Ordering};
