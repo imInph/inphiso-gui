@@ -1491,6 +1491,7 @@ dependencies = [
  "anyhow",
  "inphiso-core",
  "inphiso-platform",
+ "serde_json",
 ]
 
 [[package]]
@@ -1514,8 +1515,11 @@ dependencies = [
 name = "inphiso-platform"
 version = "0.1.0"
 dependencies = [
+ "plist",
  "serde",
+ "serde_json",
  "thiserror 2.0.21",
+ "windows",
 ]
 
 [[package]]
