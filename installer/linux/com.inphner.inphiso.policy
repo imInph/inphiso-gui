@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>inphiso</vendor>
+  <vendor_url>https://github.com/imInph/inphiso-gui</vendor_url>
+  <icon_name>inphiso</icon_name>
+
+  <!-- Lets pkexec show a meaningful prompt for inphiso's writer. -->
+  <action id="com.inphner.inphiso.write">
+    <description>Write a disk image to a drive</description>
+    <message>inphiso needs your permission to write to the drive.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/inphiso-helper</annotate>
+  </action>
+</policyconfig>
