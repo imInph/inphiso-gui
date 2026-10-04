@@ -1,5 +1,6 @@
 mod commands;
 mod flash;
+mod image;
 
 use std::sync::Arc;
 
@@ -13,6 +14,8 @@ pub fn run() {
             commands::flash,
             commands::cancel_flash,
             commands::eject,
+            image::inspect_image,
+            image::checksum,
         ])
         .run(tauri::generate_context!())
         .expect("error while running inphiso");
