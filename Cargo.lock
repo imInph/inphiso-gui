@@ -1494,6 +1494,7 @@ dependencies = [
  "anyhow",
  "inphiso-core",
  "inphiso-platform",
+ "interprocess",
  "serde",
  "serde_json",
  "tauri",

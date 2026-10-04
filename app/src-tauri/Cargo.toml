@@ -22,3 +22,4 @@ tauri-plugin-dialog = "2.8"
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
+interprocess = "2.4"

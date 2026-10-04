@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.inphner.inphiso",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "node scripts/sidecar.mjs --debug && npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "node scripts/sidecar.mjs && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -30,13 +30,16 @@
     "targets": "all",
     "category": "Utility",
     "shortDescription": "Flash Windows and Linux images to USB drives",
-    "copyright": "© 2026 imInph",
+    "copyright": "\u00a9 2026 imInph",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
+    ],
+    "externalBin": [
+      "binaries/inphiso-helper"
     ]
   }
 }

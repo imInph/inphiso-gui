@@ -41,6 +41,9 @@ jobs:
         working-directory: app
       - run: npm run build
         working-directory: app
+      # tauri-build checks that the helper sidecar exists.
+      - run: node scripts/sidecar.mjs --debug
+        working-directory: app
 
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings

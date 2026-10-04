@@ -4,6 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 cargo fmt --all --check
+(cd app && node scripts/sidecar.mjs --debug >/dev/null)
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --quiet
 (cd app && npm run --silent typecheck)
