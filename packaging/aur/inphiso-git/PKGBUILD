@@ -1,0 +1,65 @@
+# Maintainer: imInph <inph at inphner dot com>
+#
+# Builds the latest commit from GitHub. Works without an AUR account too:
+#   git clone https://github.com/imInph/inphiso-gui.git
+#   cd inphiso-gui/packaging/aur/inphiso-git
+#   makepkg -si
+
+pkgname=inphiso-git
+pkgver=0.1.0.r0.g0000000
+pkgrel=1
+pkgdesc="Flash Windows and Linux disk images to USB drives (latest commit)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/imInph/inphiso-gui"
+license=('GPL-3.0-or-later')
+depends=('webkit2gtk-4.1' 'gtk3' 'polkit' 'gcc-libs' 'glibc')
+makedepends=('git' 'cargo' 'nodejs' 'npm' 'pkgconf')
+optdepends=('wimlib: flash Windows ISOs whose install.wim is over 4 GB')
+provides=('inphiso')
+conflicts=('inphiso' 'inphiso-bin')
+# Rust does its own LTO; makepkg's LTO flags break the C parts of some crates.
+options=('!lto')
+source=("inphiso-gui::git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd inphiso-gui
+  local version
+  version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+  printf '%s.r%s.g%s' "$version" "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+}
+
+# Keep npm's and cargo's caches inside the build directory.
+_env() {
+  export npm_config_cache="$srcdir/npm-cache"
+  export CARGO_HOME="$srcdir/cargo-home"
+}
+
+prepare() {
+  _env
+  cd inphiso-gui/app
+  npm ci --no-audit --no-fund
+}
+
+build() {
+  _env
+  cd inphiso-gui/app
+  # Builds the frontend, the helper (into target/<triple>/release) and the app,
+  # without making .deb/.rpm/AppImage bundles.
+  npx tauri build --no-bundle
+}
+
+package() {
+  cd inphiso-gui
+  local triple
+  triple=$(rustc -vV | sed -n 's/^host: //p')
+
+  install -Dm755 target/release/inphiso-app "$pkgdir/usr/bin/inphiso"
+  install -Dm755 "target/$triple/release/inphiso-helper" "$pkgdir/usr/bin/inphiso-helper"
+  install -Dm644 installer/linux/com.inphner.inphiso.policy \
+    "$pkgdir/usr/share/polkit-1/actions/com.inphner.inphiso.policy"
+  install -Dm644 installer/linux/inphiso.desktop "$pkgdir/usr/share/applications/inphiso.desktop"
+  install -Dm644 app/src-tauri/icons/128x128@2x.png \
+    "$pkgdir/usr/share/icons/hicolor/256x256/apps/inphiso.png"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

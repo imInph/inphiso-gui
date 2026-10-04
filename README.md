@@ -48,18 +48,99 @@ Builds aren't code-signed yet, so the OS will warn you the first time:
 - **macOS:** open the `.dmg` and drag inphiso to Applications. On first launch macOS will say
   it can't verify the developer: open *System Settings → Privacy & Security* and choose
   *Open Anyway*.
-- **Arch Linux and derivatives:** install from the AUR with an AUR helper:
 
-  ```bash
-  yay -S inphiso-bin     # prebuilt
-  yay -S inphiso         # built from source
-  ```
+### Linux
 
-  Add `wimlib` to flash Windows ISOs whose `install.wim` is over 4 GB.
-- **Other Linux:** the `.deb` and `.rpm` pull in `wimtools` / `wimlib-utils` (for Windows ISOs) and
-  pkexec. With the AppImage or the `.tar.gz`, install `wimtools` yourself if you flash Windows
-  ISOs. The `.tar.gz` runs in place (`./inphiso`) or installs to `/opt/inphiso` with
-  `sudo ./install.sh`.
+Pick your distro. The download commands fetch the latest release and pick
+x64 or arm64 to match your machine.
+
+<details>
+<summary><b>Debian, Ubuntu, Linux Mint, Pop!_OS</b> (.deb)</summary>
+
+```bash
+VERSION=$(curl -fsSL https://api.github.com/repos/imInph/inphiso-gui/releases/latest | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+ARCH=$(dpkg --print-architecture)   # amd64 or arm64
+curl -fLO "https://github.com/imInph/inphiso-gui/releases/download/v$VERSION/inphiso_${VERSION}_${ARCH}.deb"
+sudo apt install "./inphiso_${VERSION}_${ARCH}.deb"
+```
+
+`apt` also installs `wimtools` (for Windows ISOs) and `pkexec`.
+
+</details>
+
+<details>
+<summary><b>Fedora, RHEL, AlmaLinux, Rocky Linux</b> (.rpm)</summary>
+
+```bash
+VERSION=$(curl -fsSL https://api.github.com/repos/imInph/inphiso-gui/releases/latest | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+ARCH=$(uname -m)   # x86_64 or aarch64
+curl -fLO "https://github.com/imInph/inphiso-gui/releases/download/v$VERSION/inphiso-${VERSION}-1.${ARCH}.rpm"
+sudo dnf install "./inphiso-${VERSION}-1.${ARCH}.rpm"
+```
+
+On RHEL and its rebuilds, `wimlib-utils` (for Windows ISOs) comes from
+[EPEL](https://docs.fedoraproject.org/en-US/epel/).
+
+</details>
+
+<details>
+<summary><b>openSUSE</b> (.rpm)</summary>
+
+```bash
+VERSION=$(curl -fsSL https://api.github.com/repos/imInph/inphiso-gui/releases/latest | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+ARCH=$(uname -m)   # x86_64 or aarch64
+curl -fLO "https://github.com/imInph/inphiso-gui/releases/download/v$VERSION/inphiso-${VERSION}-1.${ARCH}.rpm"
+sudo zypper install --allow-unsigned-rpm "./inphiso-${VERSION}-1.${ARCH}.rpm"
+sudo zypper install wimtools   # for Windows ISOs
+```
+
+</details>
+
+<details>
+<summary><b>Arch Linux, Manjaro, EndeavourOS</b> (build with makepkg)</summary>
+
+Builds the latest commit into a proper pacman package (remove it with `sudo pacman -R inphiso-git`):
+
+```bash
+sudo pacman -S --needed git base-devel
+git clone https://github.com/imInph/inphiso-gui.git
+cd inphiso-gui/packaging/aur/inphiso-git
+makepkg -si
+sudo pacman -S --needed wimlib   # for Windows ISOs
+```
+
+inphiso isn't on the AUR yet. Once it is, `yay -S inphiso-bin` (prebuilt) or
+`yay -S inphiso` (from source) will work too.
+
+</details>
+
+<details>
+<summary><b>Any other distro</b> (AppImage or .tar.gz)</summary>
+
+The AppImage runs without installing anything:
+
+```bash
+VERSION=$(curl -fsSL https://api.github.com/repos/imInph/inphiso-gui/releases/latest | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+ARCH=$(uname -m | sed 's/x86_64/amd64/')   # amd64 or aarch64
+curl -fLO "https://github.com/imInph/inphiso-gui/releases/download/v$VERSION/inphiso_${VERSION}_${ARCH}.AppImage"
+chmod +x "inphiso_${VERSION}_${ARCH}.AppImage"
+"./inphiso_${VERSION}_${ARCH}.AppImage"
+```
+
+Or the `.tar.gz`, which runs in place or installs to `/opt/inphiso` with a menu entry:
+
+```bash
+VERSION=$(curl -fsSL https://api.github.com/repos/imInph/inphiso-gui/releases/latest | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')   # amd64 or arm64
+curl -fL "https://github.com/imInph/inphiso-gui/releases/download/v$VERSION/inphiso_${VERSION}_${ARCH}.tar.gz" | tar xz
+cd "inphiso_${VERSION}_${ARCH}"
+sudo ./install.sh   # or just ./inphiso; remove later with sudo ./install.sh --uninstall
+```
+
+Both need WebKitGTK 4.1 and pkexec from your distro, plus `wimtools` / `wimlib` to
+flash Windows ISOs whose `install.wim` is over 4 GB.
+
+</details>
 
 ## Building
 
