@@ -1593,7 +1593,7 @@ dependencies = [
 
 [[package]]
 name = "inphiso-app"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "inphiso-core",
@@ -1611,7 +1611,7 @@ dependencies = [
 
 [[package]]
 name = "inphiso-cli"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "inphiso-core",
@@ -1621,7 +1621,7 @@ dependencies = [
 
 [[package]]
 name = "inphiso-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bzip2",
  "crc32fast",
@@ -1640,7 +1640,7 @@ dependencies = [
 
 [[package]]
 name = "inphiso-helper"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "inphiso-core",
@@ -1651,7 +1651,7 @@ dependencies = [
 
 [[package]]
 name = "inphiso-platform"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "getrandom 0.4.3",
  "interprocess",

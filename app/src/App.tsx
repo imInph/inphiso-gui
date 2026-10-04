@@ -19,7 +19,7 @@ import type { FlashEvent, FlashJob } from "./types";
 import { useSettings } from "./useSettings";
 
 const DRIVE_POLL_MS = 2000;
-const VERSION = "0.1.0";
+const VERSION = "1.0.0";
 
 const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
 

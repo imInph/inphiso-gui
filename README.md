@@ -6,8 +6,10 @@ inphiso is the desktop successor to the [inphiso script](https://github.com/imIn
 handles the stuff that usually breaks: Windows ISOs from macOS or Linux, oversized
 `install.wim` files, and the FAT32 4 GiB limit that trips up `dd` and plain file copies.
 
-> **Status:** pre-release. Everything below is implemented and tested against disk image
-> files; real-hardware testing is still in progress. Double-check the drive before you flash.
+> **1.0:** Linux ISOs are tested on real USB drives from macOS. Windows ISOs and the Windows
+> and Linux versions of the app are newer; if something goes wrong,
+> [open an issue](https://github.com/imInph/inphiso-gui/issues). As with any flashing tool,
+> double-check the drive before you flash.
 
 ## What it does
 

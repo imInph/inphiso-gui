@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release version for inphiso-bin (e.g. 0.1.0). Leave empty to skip it.
+        description: Release version for inphiso-bin (e.g. 1.0.0). Leave empty to skip it.
         required: false
       publish:
         description: Push to the AUR (needs the AUR_SSH_PRIVATE_KEY secret)

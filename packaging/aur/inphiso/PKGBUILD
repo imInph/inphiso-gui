@@ -4,7 +4,7 @@
 # sets pkgver and the checksum on each release.
 
 pkgname=inphiso
-pkgver=0.1.0
+pkgver=1.0.0
 pkgrel=1
 pkgdesc="Flash Windows and Linux disk images to USB drives"
 arch=('x86_64' 'aarch64')
