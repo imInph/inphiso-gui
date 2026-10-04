@@ -19,7 +19,8 @@ mod os;
 #[path = "device/windows.rs"]
 mod os;
 
-/// Set to `1` to allow a regular file as the "device". For tests and development only.
+/// Set to `1` to allow a regular file as the "device". Only honoured in debug
+/// builds (tests and development); release builds ignore it.
 pub const ALLOW_FILE_ENV: &str = "INPHISO_DEV_ALLOW_FILE";
 
 /// An open whole disk (or test file), ready for sector-aligned I/O.
@@ -76,7 +77,7 @@ impl Seek for Device {
 
 /// Validates `id`, unmounts everything on it and opens it for writing.
 pub fn open_for_writing(id: &str, expected_size: u64) -> Result<Device> {
-    if std::env::var(ALLOW_FILE_ENV).as_deref() == Ok("1") {
+    if cfg!(debug_assertions) && std::env::var(ALLOW_FILE_ENV).as_deref() == Ok("1") {
         if let Ok(meta) = std::fs::metadata(id) {
             if meta.is_file() {
                 // `Guard` is a unit struct on Unix but holds volume locks on Windows.
