@@ -1,0 +1,100 @@
+name: Release
+
+# A `v*` tag builds every platform and attaches the installers to a draft
+# GitHub release. Running it by hand builds the same and keeps the installers
+# as workflow artifacts, without touching releases.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            overlay: --config src-tauri/tauri.release.windows.json
+          - name: Windows arm64
+            os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            overlay: --config src-tauri/tauri.release.windows.json
+          - name: macOS Apple Silicon
+            os: macos-latest
+            target: aarch64-apple-darwin
+            overlay: --config src-tauri/tauri.release.macos.json
+          - name: macOS Intel
+            os: macos-latest
+            target: x86_64-apple-darwin
+            overlay: --config src-tauri/tauri.release.macos.json
+          - name: Linux x64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            overlay: ""
+          - name: Linux arm64
+            os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            overlay: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf rpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+        working-directory: app
+
+      # wimlib-imagex for splitting install.wim (macOS and Windows bundle it).
+      - run: node scripts/wimlib.mjs ${{ matrix.target }}
+        working-directory: app
+
+      - uses: tauri-apps/tauri-action@v0
+        id: tauri
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Code signing, once there are certificates. Empty means unsigned.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          projectPath: app
+          args: --target ${{ matrix.target }} ${{ matrix.overlay }}
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: inphiso ${{ github.ref_name }}
+          releaseBody: See the README for installation notes. Builds are unsigned for now.
+          releaseDraft: true
+          prerelease: false
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        with:
+          name: inphiso-${{ matrix.target }}
+          path: ${{ join(fromJSON(steps.tauri.outputs.artifactPaths), fromJSON('"\n"')) }}
+          if-no-files-found: error
